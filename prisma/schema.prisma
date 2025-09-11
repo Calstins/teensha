@@ -1,0 +1,231 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+  // output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  ADMIN
+  STAFF
+}
+
+enum TaskType {
+  TEXT
+  IMAGE
+  VIDEO
+  QUIZ
+  FORM
+  PICK_ONE
+  CHECKLIST
+}
+
+enum SubmissionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum BadgeStatus {
+  AVAILABLE
+  PURCHASED
+  EARNED
+}
+
+model User {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  email     String   @unique
+  password  String
+  role      Role     @default(STAFF)
+  name      String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  createdChallenges   MonthlyChallenge[]
+  createdTasks        Task[]
+  reviewedSubmissions Submission[]
+
+  @@map("users")
+}
+
+model Teen {
+  id            String         @id @default(auto()) @map("_id") @db.ObjectId
+  email         String         @unique
+  password      String
+  name          String
+  age           Int
+  gender        String?
+  state         String?
+  country       String?
+  profilePhoto  String?
+  parentEmail   String?
+  isActive      Boolean        @default(true)
+  optInPublic   Boolean        @default(false)
+  createdAt     DateTime       @default(now())
+  updatedAt     DateTime       @updatedAt
+  // Relations
+  submissions   Submission[]
+  badges        TeenBadge[]
+  progress      TeenProgress[]
+  raffleEntries RaffleEntry[]
+
+  @@map("teens")
+}
+
+model MonthlyChallenge {
+  id           String   @id @default(auto()) @map("_id") @db.ObjectId
+  year         Int
+  month        Int
+  theme        String
+  instructions String
+  goLiveDate   DateTime
+  closingDate  DateTime
+  isPublished  Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  createdById  String   @db.ObjectId
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  // Relations
+  createdBy User           @relation(fields: [createdById], references: [id])
+  tasks     Task[]
+  badge     Badge?
+  progress  TeenProgress[]
+
+  @@unique([year, month])
+  @@map("monthly_challenges")
+}
+
+model Task {
+  id             String           @id @default(auto()) @map("_id") @db.ObjectId
+  challengeId    String           @db.ObjectId
+  tabName        String // Bible Study, Book of the Month, Activities, Projects
+  title          String
+  description    String
+  taskType       TaskType
+  dueDate        DateTime?
+  isRequired     Boolean          @default(false)
+  completionRule String // e.g., "complete any 1 of these 3 options"
+  options        Json? // For PICK_ONE, QUIZ, etc.
+  maxScore       Int              @default(100)
+  createdById    String           @db.ObjectId
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+  // Relations
+  challenge      MonthlyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  createdBy      User             @relation(fields: [createdById], references: [id])
+  submissions    Submission[]
+
+  @@map("tasks")
+}
+
+model Submission {
+  id          String           @id @default(auto()) @map("_id") @db.ObjectId
+  taskId      String           @db.ObjectId
+  teenId      String           @db.ObjectId
+  content     Json // Flexible content based on task type
+  fileUrls    String[]         @default([])
+  status      SubmissionStatus @default(APPROVED) // Auto-approved by default
+  score       Int? // Only visible to admin/staff
+  reviewerId  String?          @db.ObjectId
+  reviewNote  String?
+  submittedAt DateTime         @default(now())
+  reviewedAt  DateTime?
+
+  // Relations
+  task     Task  @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  teen     Teen  @relation(fields: [teenId], references: [id], onDelete: Cascade)
+  reviewer User? @relation(fields: [reviewerId], references: [id])
+
+  @@unique([taskId, teenId])
+  @@map("submissions")
+}
+
+model Badge {
+  id          String   @id @default(auto()) @map("_id") @db.ObjectId
+  challengeId String   @unique @db.ObjectId
+  name        String
+  description String
+  imageUrl    String
+  price       Float
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  challenge  MonthlyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  teenBadges TeenBadge[]
+
+  @@map("badges")
+}
+
+model TeenBadge {
+  id          String      @id @default(auto()) @map("_id") @db.ObjectId
+  teenId      String      @db.ObjectId
+  badgeId     String      @db.ObjectId
+  status      BadgeStatus @default(AVAILABLE)
+  purchasedAt DateTime?
+  earnedAt    DateTime?
+
+  // Relations
+  teen  Teen  @relation(fields: [teenId], references: [id], onDelete: Cascade)
+  badge Badge @relation(fields: [badgeId], references: [id], onDelete: Cascade)
+
+  @@unique([teenId, badgeId])
+  @@map("teen_badges")
+}
+
+model TeenProgress {
+  id             String    @id @default(auto()) @map("_id") @db.ObjectId
+  teenId         String    @db.ObjectId
+  challengeId    String    @db.ObjectId
+  tasksTotal     Int       @default(0)
+  tasksCompleted Int       @default(0)
+  percentage     Float     @default(0)
+  completedAt    DateTime?
+  lastUpdated    DateTime  @default(now()) @updatedAt
+
+  // Relations
+  teen      Teen             @relation(fields: [teenId], references: [id], onDelete: Cascade)
+  challenge MonthlyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+
+  @@unique([teenId, challengeId])
+  @@map("teen_progress")
+}
+
+model RaffleEntry {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  teenId     String   @db.ObjectId
+  year       Int
+  isEligible Boolean  @default(false)
+  createdAt  DateTime @default(now())
+
+  // Relations
+  teen Teen @relation(fields: [teenId], references: [id], onDelete: Cascade)
+
+  @@unique([teenId, year])
+  @@map("raffle_entries")
+}
+
+model RaffleDraw {
+  id          String    @id @default(auto()) @map("_id") @db.ObjectId
+  year        Int       @unique
+  prize       String
+  description String?
+  winnerId    String?   @db.ObjectId
+  drawnAt     DateTime?
+  createdAt   DateTime  @default(now())
+
+  @@map("raffle_draws")
+}
