@@ -58,6 +58,16 @@ app.get('/', (req, res) => {
   });
 });
 
+app.get('/api/debug', (req, res) => {
+  res.json({
+    timestamp: new Date().toISOString(),
+    env: process.env.NODE_ENV,
+    hasDB: !!process.env.DATABASE_URL,
+    hasJWT: !!process.env.JWT_SECRET,
+    deployment: process.env.VERCEL ? 'Vercel' : 'Local',
+  });
+});
+
 // Health check
 app.get('/health', async (req, res) => {
   try {
