@@ -1,4 +1,4 @@
-// controllers/authController.js
+// controllers/authController.js - STORES CLOUDINARY URL ONLY
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { PrismaClient } from '@prisma/client';
@@ -33,7 +33,6 @@ export const loginUser = async (req, res) => {
     const { email, password } = req.body;
     console.log('Attempting login for:', email);
 
-    // Simple query without timeout wrapper - let Prisma handle it
     const user = await prisma.user.findUnique({
       where: { email },
       select: {
@@ -55,7 +54,6 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // Check password
     const isPasswordValid = await bcrypt.compare(password, user.password);
 
     if (!isPasswordValid) {
@@ -65,7 +63,6 @@ export const loginUser = async (req, res) => {
       });
     }
 
-    // Generate token
     const token = generateToken(user.id, 'user');
 
     console.log('Login successful for:', user.email);
@@ -85,7 +82,6 @@ export const loginUser = async (req, res) => {
     });
   } catch (error) {
     console.error('User login error:', error);
-
     res.status(500).json({
       success: false,
       message: 'Database error occurred',
@@ -104,9 +100,22 @@ export const registerTeen = async (req, res) => {
       });
     }
 
-    const { email, password, name, age, gender, state, country, parentEmail } =
-      req.body;
+    const { 
+      email, 
+      password, 
+      name, 
+      age, 
+      gender, 
+      state, 
+      country, 
+      parentEmail,
+      profilePhotoUrl // ← Receives Cloudinary URL from frontend
+    } = req.body;
 
+    console.log('📝 Registering teen:', email);
+    console.log('Profile Photo URL:', profilePhotoUrl ? '✅ Provided' : '❌ None');
+
+    // Check if teen already exists
     const existingTeen = await prisma.teen.findUnique({
       where: { email },
     });
@@ -118,8 +127,10 @@ export const registerTeen = async (req, res) => {
       });
     }
 
+    // Hash password
     const hashedPassword = await bcrypt.hash(password, 12);
 
+    // Create teen record with Cloudinary URL
     const teen = await prisma.teen.create({
       data: {
         email,
@@ -130,10 +141,14 @@ export const registerTeen = async (req, res) => {
         state,
         country,
         parentEmail,
+        profilePhoto: profilePhotoUrl || null, // ← Store URL directly
       },
     });
 
+    // Generate token
     const token = generateToken(teen.id, 'teen');
+
+    console.log('✅ Teen registered successfully:', teen.id);
 
     res.status(201).json({
       success: true,
@@ -144,6 +159,8 @@ export const registerTeen = async (req, res) => {
           email: teen.email,
           name: teen.name,
           age: teen.age,
+          gender: teen.gender,
+          profilePhoto: teen.profilePhoto, // ← Return URL
         },
         token,
       },
@@ -153,6 +170,7 @@ export const registerTeen = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: process.env.NODE_ENV === 'development' ? error.message : undefined,
     });
   }
 };
@@ -169,6 +187,8 @@ export const loginTeen = async (req, res) => {
     }
 
     const { email, password } = req.body;
+
+    console.log('🔐 Teen login attempt:', email);
 
     const teen = await prisma.teen.findUnique({
       where: { email },
@@ -192,6 +212,8 @@ export const loginTeen = async (req, res) => {
 
     const token = generateToken(teen.id, 'teen');
 
+    console.log('✅ Teen login successful:', teen.id);
+
     res.json({
       success: true,
       message: 'Login successful',
@@ -201,7 +223,8 @@ export const loginTeen = async (req, res) => {
           email: teen.email,
           name: teen.name,
           age: teen.age,
-          profilePhoto: teen.profilePhoto,
+          gender: teen.gender,
+          profilePhoto: teen.profilePhoto, // ← Return URL
         },
         token,
       },

@@ -1,6 +1,8 @@
 // controllers/teenController.js
 import { PrismaClient } from '@prisma/client';
 import { validationResult } from 'express-validator';
+import { uploadBase64Image, deleteImage } from '../utils/cloudinary.js';
+
 
 const prisma = new PrismaClient();
 
@@ -55,6 +57,34 @@ export const updateProfile = async (req, res) => {
       'optInPublic',
     ];
     const updates = {};
+
+    if (req.body.profileImage) {
+      const currentTeen = await prisma.teen.findUnique({
+        where: { id: req.teen.id },
+        select: { profilePhoto: true, email: true },
+      });
+
+      // Delete old photo
+      if (currentTeen.profilePhoto) {
+        try {
+          const urlParts = currentTeen.profilePhoto.split('/');
+          const publicId = urlParts.slice(-2).join('/').replace(/\.[^/.]+$/, '');
+          await deleteImage(publicId);
+        } catch (e) {
+          console.error('Failed to delete old photo:', e);
+        }
+      }
+
+      // Upload new photo
+      const uploadResult = await uploadBase64Image(
+        req.body.profileImage,
+        'teenshapers/profiles',
+        `teen_${currentTeen.email.split('@')[0]}_${Date.now()}`
+      );
+      
+      updates.profilePhoto = uploadResult.url;
+    }
+
 
     allowedUpdates.forEach((field) => {
       if (req.body[field] !== undefined) {
