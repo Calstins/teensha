@@ -1,14 +1,12 @@
 // controllers/submissionController.js
 import { validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import { uploadToCloudinary } from '../utils/fileUpload.js';
 import {
   updateTeenProgressHelper,
   updateRaffleEligibilityHelper,
 } from '../utils/helpers.js';
 import { handleValidationErrors } from '../middleware/validation.js';
-
-const prisma = new PrismaClient();
 
 export const submitTaskResponse = async (req, res) => {
   try {
@@ -199,13 +197,76 @@ export const getMySubmissions = async (req, res) => {
 
 export const getReviewQueue = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, challengeId } = req.query;
+    const {
+      page = 1,
+      limit = 20,
+      status,
+      challengeId,
+      search,
+      taskType,
+    } = req.query;
     const skip = (page - 1) * limit;
 
     const where = {};
+
+    // Status filter
     if (status) where.status = status;
+
+    // Challenge filter
     if (challengeId) {
       where.task = { challengeId };
+    }
+
+    // Task type filter
+    if (taskType) {
+      where.task = {
+        ...where.task,
+        taskType,
+      };
+    }
+
+    // Search filter - search across teen name, task title, and challenge theme
+    if (search) {
+      where.OR = [
+        // Search by teen name
+        {
+          teen: {
+            name: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        },
+        // Search by teen email
+        {
+          teen: {
+            email: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        },
+        // Search by task title
+        {
+          task: {
+            title: {
+              contains: search,
+              mode: 'insensitive',
+            },
+          },
+        },
+        // Search by challenge theme
+        {
+          task: {
+            challenge: {
+              theme: {
+                contains: search,
+                mode: 'insensitive',
+              },
+            },
+          },
+        },
+      ];
     }
 
     const submissions = await prisma.submission.findMany({
@@ -216,6 +277,7 @@ export const getReviewQueue = async (req, res) => {
             id: true,
             name: true,
             email: true,
+            profilePhoto: true,
           },
         },
         task: {
@@ -223,8 +285,12 @@ export const getReviewQueue = async (req, res) => {
             id: true,
             title: true,
             taskType: true,
+            tabName: true,
+            description: true,
+            maxScore: true,
             challenge: {
               select: {
+                id: true,
                 theme: true,
                 year: true,
                 month: true,

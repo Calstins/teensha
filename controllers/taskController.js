@@ -1,7 +1,5 @@
 // controllers/taskController.js
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 export const getTaskDetails = async (req, res) => {
   try {

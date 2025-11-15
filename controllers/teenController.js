@@ -1,10 +1,253 @@
 // controllers/teenController.js
-import { PrismaClient } from '@prisma/client';
-import { validationResult } from 'express-validator';
-import { uploadBase64Image, deleteImage } from '../utils/cloudinary.js';
+import prisma from '../lib/prisma.js';
 
+export const getAllTeens = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, search, state, isActive } = req.query;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-const prisma = new PrismaClient();
+    const where = {};
+
+    // Search filter
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { email: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    // State filter
+    if (state) {
+      where.state = state;
+    }
+
+    // Active status filter
+    if (isActive !== undefined) {
+      where.isActive = isActive === 'true';
+    }
+
+    const [teens, total] = await Promise.all([
+      prisma.teen.findMany({
+        where,
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          age: true,
+          gender: true,
+          state: true,
+          country: true,
+          profilePhoto: true,
+          isActive: true,
+          optInPublic: true,
+          createdAt: true,
+          _count: {
+            select: {
+              submissions: true,
+              badges: true,
+              progress: true,
+            },
+          },
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        skip,
+        take: parseInt(limit),
+      }),
+      prisma.teen.count({ where }),
+    ]);
+
+    res.json({
+      success: true,
+      data: {
+        teens,
+        pagination: {
+          page: parseInt(page),
+          limit: parseInt(limit),
+          total,
+          pages: Math.ceil(total / parseInt(limit)),
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get all teens error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const getTeenById = async (req, res) => {
+  try {
+    const { teenId } = req.params;
+
+    const teen = await prisma.teen.findUnique({
+      where: { id: teenId },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        age: true,
+        gender: true,
+        state: true,
+        country: true,
+        profilePhoto: true,
+        parentEmail: true,
+        isActive: true,
+        optInPublic: true,
+        createdAt: true,
+        _count: {
+          select: {
+            submissions: true,
+            badges: true,
+            progress: true,
+          },
+        },
+      },
+    });
+
+    if (!teen) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teen not found',
+      });
+    }
+
+    // Get recent activity
+    const recentSubmissions = await prisma.submission.findMany({
+      where: { teenId },
+      include: {
+        task: {
+          select: {
+            title: true,
+            taskType: true,
+          },
+        },
+      },
+      orderBy: {
+        submittedAt: 'desc',
+      },
+      take: 5,
+    });
+
+    // Get badges
+    const badges = await prisma.teenBadge.findMany({
+      where: { teenId },
+      include: {
+        badge: {
+          include: {
+            challenge: {
+              select: {
+                theme: true,
+                year: true,
+                month: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    // Get progress
+    const progress = await prisma.teenProgress.findMany({
+      where: { teenId },
+      include: {
+        challenge: {
+          select: {
+            theme: true,
+            year: true,
+            month: true,
+          },
+        },
+      },
+      orderBy: {
+        lastUpdated: 'desc',
+      },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        ...teen,
+        recentSubmissions,
+        badges,
+        progress,
+      },
+    });
+  } catch (error) {
+    console.error('Get teen by ID error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const updateTeen = async (req, res) => {
+  try {
+    const { teenId } = req.params;
+    const { isActive, optInPublic } = req.body;
+
+    const updateData = {};
+    if (isActive !== undefined) updateData.isActive = isActive;
+    if (optInPublic !== undefined) updateData.optInPublic = optInPublic;
+
+    const teen = await prisma.teen.update({
+      where: { id: teenId },
+      data: updateData,
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        isActive: true,
+        optInPublic: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Teen updated successfully',
+      data: teen,
+    });
+  } catch (error) {
+    console.error('Update teen error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const getTeenStats = async (req, res) => {
+  try {
+    const totalTeens = await prisma.teen.count();
+    const activeTeens = await prisma.teen.count({
+      where: { isActive: true },
+    });
+
+    res.json({
+      success: true,
+      data: {
+        total: totalTeens,
+        active: activeTeens,
+        inactive: totalTeens - activeTeens,
+      },
+    });
+  } catch (error) {
+    console.error('Get teen stats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ============================================
+// TEEN-FACING ENDPOINTS
+// ============================================
 
 export const getProfile = async (req, res) => {
   try {
@@ -12,24 +255,33 @@ export const getProfile = async (req, res) => {
       where: { id: req.teen.id },
       select: {
         id: true,
-        email: true,
         name: true,
+        email: true,
         age: true,
         gender: true,
         state: true,
         country: true,
         profilePhoto: true,
+        parentEmail: true,
+        isActive: true,
         optInPublic: true,
         createdAt: true,
       },
     });
+
+    if (!teen) {
+      return res.status(404).json({
+        success: false,
+        message: 'Teen profile not found',
+      });
+    }
 
     res.json({
       success: true,
       data: teen,
     });
   } catch (error) {
-    console.error('Get teen profile error:', error);
+    console.error('Get profile error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -39,71 +291,40 @@ export const getProfile = async (req, res) => {
 
 export const updateProfile = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array(),
-      });
-    }
+    const {
+      name,
+      age,
+      gender,
+      state,
+      country,
+      profilePhoto,
+      parentEmail,
+      optInPublic,
+    } = req.body;
 
-    const allowedUpdates = [
-      'name',
-      'age',
-      'gender',
-      'state',
-      'country',
-      'optInPublic',
-    ];
-    const updates = {};
-
-    if (req.body.profileImage) {
-      const currentTeen = await prisma.teen.findUnique({
-        where: { id: req.teen.id },
-        select: { profilePhoto: true, email: true },
-      });
-
-      // Delete old photo
-      if (currentTeen.profilePhoto) {
-        try {
-          const urlParts = currentTeen.profilePhoto.split('/');
-          const publicId = urlParts.slice(-2).join('/').replace(/\.[^/.]+$/, '');
-          await deleteImage(publicId);
-        } catch (e) {
-          console.error('Failed to delete old photo:', e);
-        }
-      }
-
-      // Upload new photo
-      const uploadResult = await uploadBase64Image(
-        req.body.profileImage,
-        'teenshapers/profiles',
-        `teen_${currentTeen.email.split('@')[0]}_${Date.now()}`
-      );
-      
-      updates.profilePhoto = uploadResult.url;
-    }
-
-
-    allowedUpdates.forEach((field) => {
-      if (req.body[field] !== undefined) {
-        updates[field] = req.body[field];
-      }
-    });
+    const updateData = {};
+    if (name) updateData.name = name;
+    if (age) updateData.age = parseInt(age);
+    if (gender) updateData.gender = gender;
+    if (state) updateData.state = state;
+    if (country) updateData.country = country;
+    if (profilePhoto !== undefined) updateData.profilePhoto = profilePhoto;
+    if (parentEmail !== undefined) updateData.parentEmail = parentEmail;
+    if (optInPublic !== undefined) updateData.optInPublic = optInPublic;
 
     const updatedTeen = await prisma.teen.update({
       where: { id: req.teen.id },
-      data: updates,
+      data: updateData,
       select: {
         id: true,
-        email: true,
         name: true,
+        email: true,
         age: true,
         gender: true,
         state: true,
         country: true,
         profilePhoto: true,
+        parentEmail: true,
         optInPublic: true,
       },
     });
@@ -114,7 +335,7 @@ export const updateProfile = async (req, res) => {
       data: updatedTeen,
     });
   } catch (error) {
-    console.error('Update teen profile error:', error);
+    console.error('Update profile error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -140,10 +361,37 @@ export const getDashboard = async (req, res) => {
       },
     });
 
-    // Get teen's progress for current challenge
-    let currentProgress = null;
-    let badgeStatus = 'AVAILABLE';
+    // Get teen's stats
+    const [totalSubmissions, totalBadges, yearlyProgress] = await Promise.all([
+      prisma.submission.count({
+        where: { teenId: req.teen.id },
+      }),
+      prisma.teenBadge.count({
+        where: {
+          teenId: req.teen.id,
+          status: { in: ['PURCHASED', 'EARNED'] },
+        },
+      }),
+      prisma.teenProgress.findMany({
+        where: {
+          teenId: req.teen.id,
+          challenge: { year: currentYear },
+        },
+      }),
+    ]);
 
+    // Calculate yearly stats
+    const completedChallenges = yearlyProgress.filter(
+      (p) => p.percentage === 100
+    ).length;
+    const averageProgress =
+      yearlyProgress.length > 0
+        ? yearlyProgress.reduce((sum, p) => sum + p.percentage, 0) /
+          yearlyProgress.length
+        : 0;
+
+    // Get current challenge progress
+    let currentProgress = null;
     if (currentChallenge) {
       currentProgress = await prisma.teenProgress.findUnique({
         where: {
@@ -154,276 +402,90 @@ export const getDashboard = async (req, res) => {
         },
       });
 
-      const teenBadge = await prisma.teenBadge.findUnique({
-        where: {
-          teenId_badgeId: {
-            teenId: req.teen.id,
-            badgeId: currentChallenge.badge.id,
+      // Get current badge status
+      if (currentChallenge.badge) {
+        const teenBadge = await prisma.teenBadge.findUnique({
+          where: {
+            teenId_badgeId: {
+              teenId: req.teen.id,
+              badgeId: currentChallenge.badge.id,
+            },
           },
-        },
-      });
-
-      badgeStatus = teenBadge?.status || 'AVAILABLE';
+        });
+        currentChallenge.badge.teenStatus = teenBadge?.status || 'AVAILABLE';
+      }
     }
 
-    // Get teen's yearly stats
-    const yearlyProgress = await prisma.teenProgress.findMany({
-      where: {
-        teenId: req.teen.id,
-        challenge: {
-          year: currentYear,
-        },
-      },
+    // Get recent submissions
+    const recentSubmissions = await prisma.submission.findMany({
+      where: { teenId: req.teen.id },
       include: {
-        challenge: {
+        task: {
           select: {
-            month: true,
-            theme: true,
-          },
-        },
-      },
-    });
-
-    // Get badges for current year
-    const yearlyBadges = await prisma.teenBadge.findMany({
-      where: {
-        teenId: req.teen.id,
-        badge: {
-          challenge: {
-            year: currentYear,
-          },
-        },
-      },
-      include: {
-        badge: {
-          include: {
+            title: true,
+            taskType: true,
             challenge: {
               select: {
-                month: true,
                 theme: true,
               },
             },
           },
         },
       },
+      orderBy: {
+        submittedAt: 'desc',
+      },
+      take: 5,
     });
 
-    // Calculate stats
-    const completedChallenges = yearlyProgress.filter(
-      (p) => p.percentage === 100
-    ).length;
-    const purchasedBadges = yearlyBadges.filter((b) =>
-      ['PURCHASED', 'EARNED'].includes(b.status)
-    ).length;
-    const earnedBadges = yearlyBadges.filter(
-      (b) => b.status === 'EARNED'
-    ).length;
-
-    // Check raffle eligibility
-    const raffleEntry = await prisma.raffleEntry.findUnique({
+    // Get upcoming challenges
+    const upcomingChallenges = await prisma.monthlyChallenge.findMany({
       where: {
-        teenId_year: {
-          teenId: req.teen.id,
-          year: currentYear,
-        },
+        isPublished: true,
+        goLiveDate: { gt: currentDate },
       },
+      include: {
+        badge: true,
+      },
+      orderBy: {
+        goLiveDate: 'asc',
+      },
+      take: 3,
     });
 
     res.json({
       success: true,
       data: {
+        stats: {
+          totalSubmissions,
+          totalBadges,
+          completedChallenges,
+          averageProgress: Math.round(averageProgress * 100) / 100,
+        },
         currentChallenge: currentChallenge
           ? {
-              id: currentChallenge.id,
-              theme: currentChallenge.theme,
+              ...currentChallenge,
               progress: currentProgress || {
                 tasksTotal: 0,
                 tasksCompleted: 0,
                 percentage: 0,
               },
-              badge: {
-                ...currentChallenge.badge,
-                status: badgeStatus,
-              },
             }
           : null,
-        yearlyStats: {
-          year: currentYear,
-          completedChallenges,
-          purchasedBadges,
-          earnedBadges,
-          totalChallenges: 12,
-          isRaffleEligible: raffleEntry?.isEligible || false,
-        },
-        recentProgress: yearlyProgress
-          .sort((a, b) => b.challenge.month - a.challenge.month)
-          .slice(0, 5),
+        recentSubmissions,
+        upcomingChallenges,
       },
     });
   } catch (error) {
-    console.error('Get teen dashboard error:', error);
+    console.error('Get dashboard error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };
 
-export const getTeensList = async (req, res) => {
-  try {
-    const {
-      page = 1,
-      limit = 20,
-      search,
-      isActive,
-      optInPublic,
-      minAge,
-      maxAge,
-    } = req.query;
-
-    const skip = (page - 1) * limit;
-    const where = {};
-
-    if (search) {
-      where.OR = [
-        { name: { contains: search, mode: 'insensitive' } },
-        { email: { contains: search, mode: 'insensitive' } },
-      ];
-    }
-
-    if (isActive !== undefined) {
-      where.isActive = isActive === 'true';
-    }
-
-    if (optInPublic !== undefined) {
-      where.optInPublic = optInPublic === 'true';
-    }
-
-    if (minAge) {
-      where.age = { ...where.age, gte: parseInt(minAge) };
-    }
-
-    if (maxAge) {
-      where.age = { ...where.age, lte: parseInt(maxAge) };
-    }
-
-    const teens = await prisma.teen.findMany({
-      where,
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        age: true,
-        gender: true,
-        state: true,
-        country: true,
-        isActive: true,
-        optInPublic: true,
-        createdAt: true,
-        _count: {
-          select: {
-            submissions: true,
-            badges: true,
-          },
-        },
-      },
-      orderBy: { createdAt: 'desc' },
-      skip,
-      take: parseInt(limit),
-    });
-
-    const total = await prisma.teen.count({ where });
-
-    res.json({
-      success: true,
-      data: {
-        teens,
-        pagination: {
-          page: parseInt(page),
-          limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / limit),
-        },
-      },
-    });
-  } catch (error) {
-    console.error('Get teens error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  }
-};
-
-export const getTeenDetails = async (req, res) => {
-  try {
-    const { teenId } = req.params;
-
-    const teen = await prisma.teen.findUnique({
-      where: { id: teenId },
-      include: {
-        submissions: {
-          include: {
-            task: {
-              include: {
-                challenge: {
-                  select: {
-                    theme: true,
-                    year: true,
-                    month: true,
-                  },
-                },
-              },
-            },
-          },
-          orderBy: { submittedAt: 'desc' },
-        },
-        badges: {
-          include: {
-            badge: {
-              include: {
-                challenge: {
-                  select: {
-                    theme: true,
-                    year: true,
-                    month: true,
-                  },
-                },
-              },
-            },
-          },
-        },
-        progress: {
-          include: {
-            challenge: {
-              select: {
-                theme: true,
-                year: true,
-                month: true,
-              },
-            },
-          },
-        },
-        raffleEntries: true,
-      },
-    });
-
-    if (!teen) {
-      return res.status(404).json({
-        success: false,
-        message: 'Teen not found',
-      });
-    }
-
-    res.json({
-      success: true,
-      data: teen,
-    });
-  } catch (error) {
-    console.error('Get teen details error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  }
-};
+// Aliases for route compatibility
+export const getTeensList = getAllTeens;
+export const getTeenDetails = getTeenById;

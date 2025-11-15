@@ -1,8 +1,6 @@
 // controllers/raffleController.js
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import { validationResult } from 'express-validator';
-
-const prisma = new PrismaClient();
 
 export const checkRaffleEligibility = async (req, res) => {
   try {

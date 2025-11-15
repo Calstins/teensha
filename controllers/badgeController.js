@@ -1,9 +1,279 @@
+// controllers/badgeController.js
 import { validationResult } from 'express-validator';
-import { PrismaClient } from '@prisma/client';
 import { updateRaffleEligibilityHelper } from '../utils/helpers.js';
 import { handleValidationErrors } from '../middleware/validation.js';
+import prisma from '../lib/prisma.js';
 
-const prisma = new PrismaClient();
+// ============================================
+// ADMIN BADGE MANAGEMENT
+// ============================================
+
+export const createBadge = async (req, res) => {
+  try {
+    handleValidationErrors(req, res, () => {});
+
+    const { challengeId, name, description, imageUrl, price } = req.body;
+
+    // Check if challenge exists
+    const challenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+    });
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    // Check if badge already exists for this challenge
+    const existing = await prisma.badge.findUnique({
+      where: { challengeId },
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: 'Badge already exists for this challenge',
+      });
+    }
+
+    const badge = await prisma.badge.create({
+      data: {
+        challengeId,
+        name,
+        description,
+        imageUrl,
+        price: parseFloat(price),
+        isActive: true,
+      },
+      include: {
+        challenge: {
+          select: {
+            theme: true,
+            year: true,
+            month: true,
+          },
+        },
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Badge created successfully',
+      data: badge,
+    });
+  } catch (error) {
+    console.error('Create badge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const getAllBadges = async (req, res) => {
+  try {
+    const { year, month, search } = req.query;
+
+    // Build where clause for challenges
+    const challengeWhere = {};
+    if (year) challengeWhere.year = parseInt(year);
+    if (month) challengeWhere.month = parseInt(month);
+
+    // Get all challenges matching criteria
+    const challenges = await prisma.monthlyChallenge.findMany({
+      where: challengeWhere,
+      select: { id: true },
+    });
+
+    const challengeIds = challenges.map((c) => c.id);
+
+    // Build badge where clause
+    const badgeWhere = {};
+    if (challengeIds.length > 0) {
+      badgeWhere.challengeId = { in: challengeIds };
+    }
+
+    if (search) {
+      badgeWhere.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const badges = await prisma.badge.findMany({
+      where: badgeWhere,
+      include: {
+        challenge: {
+          select: {
+            id: true,
+            theme: true,
+            year: true,
+            month: true,
+          },
+        },
+        _count: {
+          select: {
+            teenBadges: true,
+          },
+        },
+      },
+      orderBy: [
+        { challenge: { year: 'desc' } },
+        { challenge: { month: 'desc' } },
+      ],
+    });
+
+    res.json({
+      success: true,
+      data: badges,
+    });
+  } catch (error) {
+    console.error('Get all badges error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const getBadgeById = async (req, res) => {
+  try {
+    const { badgeId } = req.params;
+
+    const badge = await prisma.badge.findUnique({
+      where: { id: badgeId },
+      include: {
+        challenge: {
+          select: {
+            id: true,
+            theme: true,
+            year: true,
+            month: true,
+          },
+        },
+        _count: {
+          select: {
+            teenBadges: true,
+          },
+        },
+      },
+    });
+
+    if (!badge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Badge not found',
+      });
+    }
+
+    // Get purchase stats
+    const purchaseStats = await prisma.teenBadge.groupBy({
+      by: ['status'],
+      where: { badgeId },
+      _count: true,
+    });
+
+    const stats = purchaseStats.reduce((acc, stat) => {
+      acc[stat.status.toLowerCase()] = stat._count;
+      return acc;
+    }, {});
+
+    res.json({
+      success: true,
+      data: {
+        ...badge,
+        stats,
+      },
+    });
+  } catch (error) {
+    console.error('Get badge by ID error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const updateBadge = async (req, res) => {
+  try {
+    const { badgeId } = req.params;
+    const { name, description, imageUrl, price, isActive } = req.body;
+
+    const updateData = {};
+    if (name !== undefined) updateData.name = name;
+    if (description !== undefined) updateData.description = description;
+    if (imageUrl !== undefined) updateData.imageUrl = imageUrl;
+    if (price !== undefined) updateData.price = parseFloat(price);
+    if (isActive !== undefined) updateData.isActive = isActive;
+
+    const badge = await prisma.badge.update({
+      where: { id: badgeId },
+      data: updateData,
+      include: {
+        challenge: {
+          select: {
+            theme: true,
+            year: true,
+            month: true,
+          },
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Badge updated successfully',
+      data: badge,
+    });
+  } catch (error) {
+    console.error('Update badge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const deleteBadge = async (req, res) => {
+  try {
+    const { badgeId } = req.params;
+
+    // Check if badge has any purchases
+    const purchaseCount = await prisma.teenBadge.count({
+      where: { badgeId },
+    });
+
+    if (purchaseCount > 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot delete badge that has been purchased',
+      });
+    }
+
+    await prisma.badge.delete({
+      where: { id: badgeId },
+    });
+
+    res.json({
+      success: true,
+      message: 'Badge deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete badge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ============================================
+// TEEN BADGE OPERATIONS
+// ============================================
 
 export const purchaseBadge = async (req, res) => {
   try {
@@ -136,16 +406,26 @@ export const getMyBadges = async (req, res) => {
   try {
     const { year } = req.query;
 
+    // Build where clause
     const whereClause = {
       teenId: req.teen.id,
     };
 
+    // If year filter, get challenges for that year first
     if (year) {
-      whereClause.badge = {
-        challenge: {
-          year: parseInt(year),
-        },
-      };
+      const challenges = await prisma.monthlyChallenge.findMany({
+        where: { year: parseInt(year) },
+        select: { id: true },
+      });
+      const challengeIds = challenges.map((c) => c.id);
+
+      const badges = await prisma.badge.findMany({
+        where: { challengeId: { in: challengeIds } },
+        select: { id: true },
+      });
+      const badgeIds = badges.map((b) => b.id);
+
+      whereClause.badgeId = { in: badgeIds };
     }
 
     const teenBadges = await prisma.teenBadge.findMany({
@@ -163,14 +443,12 @@ export const getMyBadges = async (req, res) => {
           },
         },
       },
-      orderBy: {
-        badge: {
-          challenge: {
-            month: 'asc',
-          },
-        },
-      },
     });
+
+    // Sort manually by month
+    teenBadges.sort(
+      (a, b) => a.badge.challenge.month - b.badge.challenge.month
+    );
 
     res.json({
       success: true,
@@ -202,34 +480,59 @@ export const getBadgeStats = async (req, res) => {
   try {
     const { year, month } = req.query;
 
-    const whereClause = {};
+    // Build where clause for challenges
+    const challengeWhere = {};
+    if (year) challengeWhere.year = parseInt(year);
+    if (month) challengeWhere.month = parseInt(month);
+
+    let whereClause = {};
+
+    // If filtering by year/month, get those challenges first
     if (year || month) {
-      whereClause.badge = {
-        challenge: {},
-      };
-      if (year) whereClause.badge.challenge.year = parseInt(year);
-      if (month) whereClause.badge.challenge.month = parseInt(month);
+      const challenges = await prisma.monthlyChallenge.findMany({
+        where: challengeWhere,
+        select: { id: true },
+      });
+      const challengeIds = challenges.map((c) => c.id);
+
+      const badges = await prisma.badge.findMany({
+        where: { challengeId: { in: challengeIds } },
+        select: { id: true },
+      });
+      const badgeIds = badges.map((b) => b.id);
+
+      whereClause.badgeId = { in: badgeIds };
     }
 
+    // Get status breakdown
     const stats = await prisma.teenBadge.groupBy({
       by: ['status'],
       where: whereClause,
       _count: true,
     });
 
-    const totalRevenue = await prisma.teenBadge.aggregate({
+    // Get all purchased/earned badges with their prices
+    const purchasedBadges = await prisma.teenBadge.findMany({
       where: {
         ...whereClause,
         status: {
           in: ['PURCHASED', 'EARNED'],
         },
       },
-      _sum: {
+      include: {
         badge: {
-          price: true,
+          select: {
+            price: true,
+          },
         },
       },
     });
+
+    // Calculate total revenue
+    const totalRevenue = purchasedBadges.reduce(
+      (sum, tb) => sum + (tb.badge.price || 0),
+      0
+    );
 
     res.json({
       success: true,
@@ -238,7 +541,7 @@ export const getBadgeStats = async (req, res) => {
           acc[stat.status.toLowerCase()] = stat._count;
           return acc;
         }, {}),
-        totalRevenue: totalRevenue._sum || 0,
+        totalRevenue,
       },
     });
   } catch (error) {

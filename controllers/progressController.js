@@ -1,7 +1,5 @@
 // controllers/progressController.js
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 export const getChallengeProgress = async (req, res) => {
   try {
@@ -112,12 +110,15 @@ export const getProgressAnalytics = async (req, res) => {
     const currentYear = year ? parseInt(year) : new Date().getFullYear();
     const currentMonth = month ? parseInt(month) : undefined;
 
-    let challengeWhere = { year: currentYear };
+    let challengeWhere = {
+      year: currentYear,
+      isPublished: true, // ✅ Only show published challenges
+    };
+
     if (currentMonth) {
       challengeWhere.month = currentMonth;
     }
 
-    // Get challenges for the specified period
     const challenges = await prisma.monthlyChallenge.findMany({
       where: challengeWhere,
       include: {
@@ -128,22 +129,21 @@ export const getProgressAnalytics = async (req, res) => {
           },
         },
       },
+      orderBy: { month: 'asc' },
     });
 
-    const analytics = [];
-
-    for (const challenge of challenges) {
+    const analytics = challenges.map((challenge) => {
       const totalParticipants = challenge.progress.length;
       const completedCount = challenge.progress.filter(
         (p) => p.percentage === 100
       ).length;
+
       const averageProgress =
         totalParticipants > 0
           ? challenge.progress.reduce((sum, p) => sum + p.percentage, 0) /
             totalParticipants
           : 0;
 
-      // Progress distribution
       const progressDistribution = {
         '0-25': challenge.progress.filter(
           (p) => p.percentage >= 0 && p.percentage < 25
@@ -160,7 +160,7 @@ export const getProgressAnalytics = async (req, res) => {
         100: completedCount,
       };
 
-      analytics.push({
+      return {
         challenge: {
           id: challenge.id,
           theme: challenge.theme,
@@ -173,23 +173,27 @@ export const getProgressAnalytics = async (req, res) => {
           completedCount,
           completionRate:
             totalParticipants > 0
-              ? (completedCount / totalParticipants) * 100
+              ? Math.round((completedCount / totalParticipants) * 100 * 100) /
+                100
               : 0,
           averageProgress: Math.round(averageProgress * 100) / 100,
           progressDistribution,
         },
-      });
-    }
+      };
+    });
+
+    console.log('✅ Analytics data:', analytics.length, 'challenges');
 
     res.json({
       success: true,
-      data: analytics,
+      data: analytics, // ✅ Always returns array
     });
   } catch (error) {
-    console.error('Get progress analytics error:', error);
+    console.error('❌ Get progress analytics error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };

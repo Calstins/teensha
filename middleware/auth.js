@@ -1,8 +1,6 @@
 // middleware/auth.js
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 // Authentication middleware for teens
 export const authenticateTeen = async (req, res, next) => {

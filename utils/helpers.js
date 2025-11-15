@@ -1,7 +1,5 @@
 // utils/helpers.js
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import prisma from '../lib/prisma.js';
 
 // Calculate progress percentage
 export const calculateProgress = (completed, total) => {

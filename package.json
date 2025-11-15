@@ -7,6 +7,9 @@
     "dev": "nodemon index.js",
     "start": "node index.js",
     "build": "prisma generate",
+    "seed:users": "node scripts/seedUsers.js",
+    "seed:challenges": "node scripts/seedChallenges.js",
+    "seed:all": "npm run seed:users && npm run seed:challenges",
     "vercel-build": "prisma generate",
     "postinstall": "prisma generate"
   },
@@ -19,7 +22,7 @@
     "bcryptjs": "^3.0.2",
     "cloudinary": "^2.8.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
+    "dotenv": "^17.2.3",
     "express": "^5.1.0",
     "express-rate-limit": "^8.1.0",
     "express-validator": "^7.2.1",

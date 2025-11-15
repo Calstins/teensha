@@ -1,11 +1,280 @@
-import { PrismaClient } from '@prisma/client';
-import { getCurrentChallengeUtils } from '../utils/helpers.js';
+// controllers/challengeController.js
+import { validationResult } from 'express-validator';
+import prisma from '../lib/prisma.js';
+import { handleValidationErrors } from '../middleware/validation.js';
 
-const prisma = new PrismaClient();
+export const createChallenge = async (req, res) => {
+  try {
+    handleValidationErrors(req, res, () => {});
+
+    const {
+      year,
+      month,
+      theme,
+      instructions,
+      goLiveDate,
+      closingDate,
+      badgeData,
+    } = req.body;
+
+    // Check if challenge already exists for this year/month
+    const existing = await prisma.monthlyChallenge.findFirst({
+      where: {
+        year: parseInt(year),
+        month: parseInt(month),
+      },
+    });
+
+    if (existing) {
+      return res.status(400).json({
+        success: false,
+        message: 'Challenge already exists for this month',
+      });
+    }
+
+    // Create challenge with badge in a transaction
+    const challenge = await prisma.monthlyChallenge.create({
+      data: {
+        year: parseInt(year),
+        month: parseInt(month),
+        theme,
+        instructions,
+        goLiveDate: new Date(goLiveDate),
+        closingDate: new Date(closingDate),
+        createdById: req.user.id,
+        badge: badgeData
+          ? {
+              create: {
+                name: badgeData.name,
+                description: badgeData.description,
+                imageUrl: badgeData.imageUrl,
+                price: parseFloat(badgeData.price),
+              },
+            }
+          : undefined,
+      },
+      include: {
+        badge: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    res.status(201).json({
+      success: true,
+      message: 'Challenge created successfully',
+      data: challenge,
+    });
+  } catch (error) {
+    console.error('Create challenge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const getChallenges = async (req, res) => {
+  try {
+    const { year, month, search, limit = 50 } = req.query;
+
+    const where = {};
+
+    if (year) where.year = parseInt(year);
+    if (month) where.month = parseInt(month);
+
+    // MongoDB text search
+    if (search) {
+      where.OR = [
+        { theme: { contains: search, mode: 'insensitive' } },
+        { instructions: { contains: search, mode: 'insensitive' } },
+      ];
+    }
+
+    const challenges = await prisma.monthlyChallenge.findMany({
+      where,
+      include: {
+        badge: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: {
+            tasks: true,
+            progress: true,
+          },
+        },
+      },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+      take: parseInt(limit),
+    });
+
+    res.json({
+      success: true,
+      data: {
+        challenges,
+        total: challenges.length,
+      },
+    });
+  } catch (error) {
+    console.error('Get challenges error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const getChallengeById = async (req, res) => {
+  try {
+    const { challengeId } = req.params;
+
+    const challenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+      include: {
+        badge: true,
+        tasks: {
+          orderBy: [{ tabName: 'asc' }, { createdAt: 'asc' }],
+        },
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: {
+            progress: true,
+          },
+        },
+      },
+    });
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    res.json({
+      success: true,
+      data: challenge,
+    });
+  } catch (error) {
+    console.error('Get challenge by ID error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const publishChallenge = async (req, res) => {
+  try {
+    const { challengeId } = req.params;
+
+    const challenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+    });
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    const updated = await prisma.monthlyChallenge.update({
+      where: { id: challengeId },
+      data: {
+        isPublished: true,
+        isActive: true,
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Challenge published successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Publish challenge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const deleteChallenge = async (req, res) => {
+  try {
+    const { challengeId } = req.params;
+
+    const challenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+    });
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    // Delete challenge (cascade will handle related records)
+    await prisma.monthlyChallenge.delete({
+      where: { id: challengeId },
+    });
+
+    res.json({
+      success: true,
+      message: 'Challenge deleted successfully',
+    });
+  } catch (error) {
+    console.error('Delete challenge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ============================================
+// TEEN-FACING ENDPOINTS
+// ============================================
 
 export const getCurrentChallenge = async (req, res) => {
   try {
-    const challenge = await getCurrentChallengeUtils();
+    const currentDate = new Date();
+
+    // Find the current active challenge
+    const challenge = await prisma.monthlyChallenge.findFirst({
+      where: {
+        isPublished: true,
+        isActive: true,
+        goLiveDate: { lte: currentDate },
+        closingDate: { gte: currentDate },
+      },
+      include: {
+        badge: true,
+        tasks: {
+          orderBy: [{ tabName: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
 
     if (!challenge) {
       return res.json({
@@ -26,14 +295,17 @@ export const getCurrentChallenge = async (req, res) => {
     });
 
     // Get teen's badge status
-    const teenBadge = await prisma.teenBadge.findUnique({
-      where: {
-        teenId_badgeId: {
-          teenId: req.teen.id,
-          badgeId: challenge.badge.id,
+    let teenBadge = null;
+    if (challenge.badge) {
+      teenBadge = await prisma.teenBadge.findUnique({
+        where: {
+          teenId_badgeId: {
+            teenId: req.teen.id,
+            badgeId: challenge.badge.id,
+          },
         },
-      },
-    });
+      });
+    }
 
     // Get submissions for this challenge
     const submissions = await prisma.submission.findMany({
@@ -44,30 +316,37 @@ export const getCurrentChallenge = async (req, res) => {
         },
       },
       include: {
-        task: true,
+        task: {
+          select: {
+            id: true,
+            title: true,
+            tabName: true,
+            taskType: true,
+          },
+        },
       },
     });
 
-    // Group tasks by tab
-    const tasksByTab = challenge.tasks.reduce((acc, task) => {
-      if (!acc[task.tabName]) {
-        acc[task.tabName] = [];
+    // Group tasks by tab with submission status
+    const tasksByTab = {};
+    for (const task of challenge.tasks) {
+      if (!tasksByTab[task.tabName]) {
+        tasksByTab[task.tabName] = [];
       }
 
-      const submission = submissions.find((s) => s.taskId === task.id);
-      acc[task.tabName].push({
+      const submission = submissions.find((s) => s.task.id === task.id);
+      tasksByTab[task.tabName].push({
         ...task,
         submission: submission
           ? {
               id: submission.id,
               status: submission.status,
               submittedAt: submission.submittedAt,
+              score: submission.score,
             }
           : null,
       });
-
-      return acc;
-    }, {});
+    }
 
     res.json({
       success: true,
@@ -78,12 +357,18 @@ export const getCurrentChallenge = async (req, res) => {
           instructions: challenge.instructions,
           goLiveDate: challenge.goLiveDate,
           closingDate: challenge.closingDate,
+          year: challenge.year,
+          month: challenge.month,
         },
         tasks: tasksByTab,
-        badge: {
-          ...challenge.badge,
-          status: teenBadge?.status || 'AVAILABLE',
-        },
+        badge: challenge.badge
+          ? {
+              ...challenge.badge,
+              status: teenBadge?.status || 'AVAILABLE',
+              purchasedAt: teenBadge?.purchasedAt || null,
+              earnedAt: teenBadge?.earnedAt || null,
+            }
+          : null,
         progress: progress || {
           tasksTotal: challenge.tasks.length,
           tasksCompleted: 0,
@@ -96,6 +381,7 @@ export const getCurrentChallenge = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };
@@ -104,6 +390,7 @@ export const getCommunityStats = async (req, res) => {
   try {
     const currentDate = new Date();
 
+    // Get current active challenge
     const challenge = await prisma.monthlyChallenge.findFirst({
       where: {
         isPublished: true,
@@ -125,42 +412,30 @@ export const getCommunityStats = async (req, res) => {
       });
     }
 
-    // Get total participants
-    const totalParticipants = await prisma.teenProgress.count({
+    // Get all progress for this challenge
+    const allProgress = await prisma.teenProgress.findMany({
       where: {
         challengeId: challenge.id,
       },
     });
 
-    // Get completion stats
-    const completionStats = await prisma.teenProgress.groupBy({
-      by: ['tasksCompleted'],
-      where: {
-        challengeId: challenge.id,
-      },
-      _count: true,
-    });
+    const totalParticipants = allProgress.length;
+
+    // Group by tasks completed
+    const completionStats = {};
+    for (const progress of allProgress) {
+      const key = `${progress.tasksCompleted}_tasks`;
+      completionStats[key] = (completionStats[key] || 0) + 1;
+    }
 
     // Get teen's ranking
-    const teenProgress = await prisma.teenProgress.findUnique({
-      where: {
-        teenId_challengeId: {
-          teenId: req.teen.id,
-          challengeId: challenge.id,
-        },
-      },
-    });
-
     let teenRanking = null;
-    if (teenProgress) {
-      const betterCount = await prisma.teenProgress.count({
-        where: {
-          challengeId: challenge.id,
-          percentage: {
-            gt: teenProgress.percentage,
-          },
-        },
-      });
+    const teenProgress = allProgress.find((p) => p.teenId === req.teen.id);
+
+    if (teenProgress && totalParticipants > 0) {
+      const betterCount = allProgress.filter(
+        (p) => p.percentage > teenProgress.percentage
+      ).length;
 
       const percentile = Math.round(
         (1 - betterCount / totalParticipants) * 100
@@ -168,52 +443,65 @@ export const getCommunityStats = async (req, res) => {
       teenRanking = {
         percentage: teenProgress.percentage,
         ahead_of_percentage: 100 - percentile,
+        rank: betterCount + 1,
+        total: totalParticipants,
       };
     }
 
     // Get popular tasks (most submissions)
-    const popularTasks = await prisma.submission.groupBy({
-      by: ['taskId'],
+    const allSubmissions = await prisma.submission.findMany({
       where: {
         task: {
           challengeId: challenge.id,
         },
       },
-      _count: true,
-      orderBy: {
-        _count: 'desc',
+      select: {
+        taskId: true,
       },
-      take: 3,
     });
+
+    // Count submissions per task
+    const taskCounts = {};
+    for (const sub of allSubmissions) {
+      taskCounts[sub.taskId] = (taskCounts[sub.taskId] || 0) + 1;
+    }
+
+    // Get top 3 tasks
+    const topTaskIds = Object.entries(taskCounts)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 3)
+      .map(([taskId]) => taskId);
 
     const taskDetails = await prisma.task.findMany({
       where: {
-        id: {
-          in: popularTasks.map((pt) => pt.taskId),
-        },
+        id: { in: topTaskIds },
       },
       select: {
         id: true,
         title: true,
         tabName: true,
+        taskType: true,
       },
     });
 
-    const popularTasksWithDetails = popularTasks.map((pt) => ({
-      ...taskDetails.find((td) => td.id === pt.taskId),
-      submissions: pt._count,
+    const popularTasks = taskDetails.map((task) => ({
+      ...task,
+      submissions: taskCounts[task.id] || 0,
     }));
 
     res.json({
       success: true,
       data: {
         totalParticipants,
-        completionStats: completionStats.reduce((acc, stat) => {
-          acc[`${stat.tasksCompleted}_tasks`] = stat._count;
-          return acc;
-        }, {}),
+        completionStats,
         teenRanking,
-        popularTasks: popularTasksWithDetails,
+        popularTasks,
+        challenge: {
+          id: challenge.id,
+          theme: challenge.theme,
+          month: challenge.month,
+          year: challenge.year,
+        },
       },
     });
   } catch (error) {
@@ -221,6 +509,7 @@ export const getCommunityStats = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };
@@ -229,6 +518,7 @@ export const getLeaderboard = async (req, res) => {
   try {
     const currentDate = new Date();
 
+    // Get current active challenge
     const challenge = await prisma.monthlyChallenge.findFirst({
       where: {
         isPublished: true,
@@ -245,14 +535,10 @@ export const getLeaderboard = async (req, res) => {
       });
     }
 
-    // Get top performers who opted in for public recognition
-    const topTeens = await prisma.teenProgress.findMany({
+    // Get all progress for teens who opted in for public recognition
+    const allProgress = await prisma.teenProgress.findMany({
       where: {
         challengeId: challenge.id,
-        teen: {
-          optInPublic: true,
-          isActive: true,
-        },
       },
       include: {
         teen: {
@@ -260,15 +546,30 @@ export const getLeaderboard = async (req, res) => {
             id: true,
             name: true,
             profilePhoto: true,
+            optInPublic: true,
+            isActive: true,
           },
         },
       },
-      orderBy: [
-        { percentage: 'desc' },
-        { lastUpdated: 'asc' }, // Earlier completion wins ties
-      ],
-      take: 20,
     });
+
+    // Filter for opted-in and active teens only
+    const publicProgress = allProgress.filter(
+      (p) => p.teen.optInPublic && p.teen.isActive
+    );
+
+    // Sort by percentage (desc), then by lastUpdated (asc) for ties
+    publicProgress.sort((a, b) => {
+      if (b.percentage !== a.percentage) {
+        return b.percentage - a.percentage;
+      }
+      return (
+        new Date(a.lastUpdated).getTime() - new Date(b.lastUpdated).getTime()
+      );
+    });
+
+    // Take top 20
+    const topTeens = publicProgress.slice(0, 20);
 
     const leaderboard = topTeens.map((progress, index) => ({
       rank: index + 1,
@@ -278,6 +579,7 @@ export const getLeaderboard = async (req, res) => {
       },
       percentage: progress.percentage,
       tasksCompleted: progress.tasksCompleted,
+      tasksTotal: progress.tasksTotal,
       completedAt: progress.completedAt,
     }));
 
@@ -290,6 +592,7 @@ export const getLeaderboard = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };

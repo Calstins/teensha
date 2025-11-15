@@ -1,10 +1,9 @@
+//teensha/controllers/adminController.js
 import bcrypt from 'bcryptjs';
-import { PrismaClient } from '@prisma/client';
+import prisma from '../lib/prisma.js';
 import { validationResult } from 'express-validator';
 import { sendChallengeNotification } from '../utils/notifications.js';
 import { handleValidationErrors } from '../middleware/validation.js';
-
-const prisma = new PrismaClient();
 
 export const createStaff = async (req, res) => {
   try {
@@ -66,6 +65,8 @@ export const createStaff = async (req, res) => {
 
 export const getAllStaff = async (req, res) => {
   try {
+    console.log('📋 Getting all staff - Query params:', req.query);
+
     const { page = 1, limit = 20, search, role, isActive } = req.query;
     const skip = (page - 1) * limit;
 
@@ -85,6 +86,8 @@ export const getAllStaff = async (req, res) => {
     if (isActive !== undefined) {
       where.isActive = isActive === 'true';
     }
+
+    console.log('🔍 Where clause:', JSON.stringify(where, null, 2));
 
     const staff = await prisma.user.findMany({
       where,
@@ -111,6 +114,9 @@ export const getAllStaff = async (req, res) => {
 
     const total = await prisma.user.count({ where });
 
+    console.log('✅ Found staff:', staff.length, 'Total:', total);
+    console.log('📝 Staff data:', JSON.stringify(staff, null, 2));
+
     res.json({
       success: true,
       data: {
@@ -124,10 +130,11 @@ export const getAllStaff = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Get staff error:', error);
+    console.error('❌ Get staff error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message, // Add this for debugging
     });
   }
 };
@@ -257,17 +264,14 @@ export const createChallenge = async (req, res) => {
       instructions,
       goLiveDate,
       closingDate,
-      badge,
-      tasks,
+      badgeData, // ✅ Changed from 'badge'
     } = req.body;
 
-    // Check if challenge already exists for this month/year
-    const existingChallenge = await prisma.monthlyChallenge.findUnique({
+    // Check if challenge already exists
+    const existingChallenge = await prisma.monthlyChallenge.findFirst({
       where: {
-        year_month: {
-          year: parseInt(year),
-          month: parseInt(month),
-        },
+        year: parseInt(year),
+        month: parseInt(month),
       },
     });
 
@@ -289,71 +293,149 @@ export const createChallenge = async (req, res) => {
       });
     }
 
-    // Create challenge with badge and tasks in a transaction
-    const challenge = await prisma.$transaction(async (tx) => {
-      // Create challenge
-      const newChallenge = await tx.monthlyChallenge.create({
-        data: {
-          year: parseInt(year),
-          month: parseInt(month),
-          theme,
-          instructions,
-          goLiveDate: goLive,
-          closingDate: closing,
-          isPublished: req.user.role === 'ADMIN', // Auto-publish for admin, draft for staff
-          createdById: req.user.id,
+    // Create challenge with badge
+    const challenge = await prisma.monthlyChallenge.create({
+      data: {
+        year: parseInt(year),
+        month: parseInt(month),
+        theme,
+        instructions,
+        goLiveDate: goLive,
+        closingDate: closing,
+        isPublished: false, // Always start as draft
+        createdById: req.user.id,
+        badge: badgeData
+          ? {
+              create: {
+                name: badgeData.name,
+                description: badgeData.description,
+                imageUrl: badgeData.imageUrl,
+                price: parseFloat(badgeData.price),
+              },
+            }
+          : undefined,
+      },
+      include: {
+        badge: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
         },
-      });
+      },
+    });
 
-      // Create badge
-      await tx.badge.create({
+    res.status(201).json({
+      success: true,
+      message: 'Challenge created successfully',
+      data: challenge,
+    });
+  } catch (error) {
+    console.error('❌ Create challenge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const updateChallenge = async (req, res) => {
+  try {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Validation failed',
+        errors: errors.array(),
+      });
+    }
+
+    const { challengeId } = req.params;
+    const { theme, instructions, goLiveDate, closingDate, badge } = req.body;
+
+    // Check if challenge exists
+    const existingChallenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+      include: { badge: true },
+    });
+
+    if (!existingChallenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    // Validate dates if provided
+    if (goLiveDate && closingDate) {
+      const goLive = new Date(goLiveDate);
+      const closing = new Date(closingDate);
+
+      if (goLive >= closing) {
+        return res.status(400).json({
+          success: false,
+          message: 'Go-live date must be before closing date',
+        });
+      }
+    }
+
+    // Prepare update data
+    const updateData = {};
+
+    if (theme) updateData.theme = theme;
+    if (instructions) updateData.instructions = instructions;
+    if (goLiveDate) updateData.goLiveDate = new Date(goLiveDate);
+    if (closingDate) updateData.closingDate = new Date(closingDate);
+
+    // Update badge if provided
+    if (badge && existingChallenge.badge) {
+      await prisma.badge.update({
+        where: { id: existingChallenge.badge.id },
         data: {
-          challengeId: newChallenge.id,
           name: badge.name,
           description: badge.description,
           imageUrl: badge.imageUrl,
           price: parseFloat(badge.price),
         },
       });
+    }
 
-      // Create tasks
-      for (const task of tasks) {
-        await tx.task.create({
-          data: {
-            challengeId: newChallenge.id,
-            tabName: task.tabName,
-            title: task.title,
-            description: task.description,
-            taskType: task.taskType,
-            dueDate: task.dueDate ? new Date(task.dueDate) : null,
-            isRequired: task.isRequired || false,
-            completionRule: task.completionRule || 'complete this task',
-            options: task.options || {},
-            maxScore: task.maxScore || 100,
-            createdById: req.user.id,
+    // Update challenge
+    const updatedChallenge = await prisma.monthlyChallenge.update({
+      where: { id: challengeId },
+      data: updateData,
+      include: {
+        badge: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
           },
-        });
-      }
-
-      return newChallenge;
-    });
-
-    res.status(201).json({
-      success: true,
-      message: 'Challenge created successfully',
-      data: {
-        id: challenge.id,
-        theme: challenge.theme,
-        year: challenge.year,
-        month: challenge.month,
-        isPublished: challenge.isPublished,
+        },
+        _count: {
+          select: {
+            tasks: true,
+            progress: true,
+          },
+        },
       },
     });
+
+    res.json({
+      success: true,
+      message: 'Challenge updated successfully',
+      data: updatedChallenge,
+    });
   } catch (error) {
-    console.error('Create challenge error:', error);
+    console.error('❌ Update challenge error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };
@@ -411,13 +493,34 @@ export const publishChallenge = async (req, res) => {
 
 export const getAllChallenges = async (req, res) => {
   try {
-    const { page = 1, limit = 20, year, isPublished, isActive } = req.query;
+    console.log('📋 Getting all challenges - Query params:', req.query);
+
+    const {
+      page = 1,
+      limit = 50,
+      year,
+      month,
+      search,
+      isPublished,
+      isActive,
+    } = req.query;
     const skip = (page - 1) * limit;
 
     const where = {};
 
     if (year) {
       where.year = parseInt(year);
+    }
+
+    if (month) {
+      where.month = parseInt(month);
+    }
+
+    if (search) {
+      where.OR = [
+        { theme: { contains: search, mode: 'insensitive' } },
+        { instructions: { contains: search, mode: 'insensitive' } },
+      ];
     }
 
     if (isPublished !== undefined) {
@@ -428,29 +531,36 @@ export const getAllChallenges = async (req, res) => {
       where.isActive = isActive === 'true';
     }
 
-    const challenges = await prisma.monthlyChallenge.findMany({
-      where,
-      include: {
-        badge: true,
-        createdBy: {
-          select: {
-            name: true,
-            role: true,
-          },
-        },
-        _count: {
-          select: {
-            tasks: true,
-            progress: true,
-          },
-        },
-      },
-      orderBy: [{ year: 'desc' }, { month: 'desc' }],
-      skip,
-      take: parseInt(limit),
-    });
+    console.log('🔍 Where clause:', JSON.stringify(where, null, 2));
 
-    const total = await prisma.monthlyChallenge.count({ where });
+    const [challenges, total] = await Promise.all([
+      prisma.monthlyChallenge.findMany({
+        where,
+        include: {
+          badge: true,
+          createdBy: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              role: true,
+            },
+          },
+          _count: {
+            select: {
+              tasks: true,
+              progress: true,
+            },
+          },
+        },
+        orderBy: [{ year: 'desc' }, { month: 'desc' }],
+        skip: parseInt(skip),
+        take: parseInt(limit),
+      }),
+      prisma.monthlyChallenge.count({ where }),
+    ]);
+
+    console.log('✅ Found challenges:', challenges.length, 'Total:', total);
 
     res.json({
       success: true,
@@ -465,10 +575,11 @@ export const getAllChallenges = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Get challenges error:', error);
+    console.error('❌ Get challenges error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };

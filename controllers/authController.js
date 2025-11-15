@@ -1,16 +1,8 @@
 // controllers/authController.js - STORES CLOUDINARY URL ONLY
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { PrismaClient } from '@prisma/client';
 import { validationResult } from 'express-validator';
-
-const prisma = new PrismaClient({
-  datasources: {
-    db: {
-      url: process.env.DATABASE_URL,
-    },
-  },
-});
+import prisma from '../lib/prisma.js';
 
 // Generate JWT token
 const generateToken = (id, type) => {
@@ -100,20 +92,23 @@ export const registerTeen = async (req, res) => {
       });
     }
 
-    const { 
-      email, 
-      password, 
-      name, 
-      age, 
-      gender, 
-      state, 
-      country, 
+    const {
+      email,
+      password,
+      name,
+      age,
+      gender,
+      state,
+      country,
       parentEmail,
-      profilePhotoUrl // ← Receives Cloudinary URL from frontend
+      profilePhotoUrl, // ← Receives Cloudinary URL from frontend
     } = req.body;
 
     console.log('📝 Registering teen:', email);
-    console.log('Profile Photo URL:', profilePhotoUrl ? '✅ Provided' : '❌ None');
+    console.log(
+      'Profile Photo URL:',
+      profilePhotoUrl ? '✅ Provided' : '❌ None'
+    );
 
     // Check if teen already exists
     const existingTeen = await prisma.teen.findUnique({
