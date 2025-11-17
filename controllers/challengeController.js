@@ -2,6 +2,7 @@
 import { validationResult } from 'express-validator';
 import prisma from '../lib/prisma.js';
 import { handleValidationErrors } from '../middleware/validation.js';
+import { sendChallengeNotification } from '../utils/notifications.js';
 
 export const createChallenge = async (req, res) => {
   try {
@@ -28,7 +29,27 @@ export const createChallenge = async (req, res) => {
     if (existing) {
       return res.status(400).json({
         success: false,
-        message: 'Challenge already exists for this month',
+        message: `A challenge already exists for ${new Date(
+          year,
+          month - 1
+        ).toLocaleDateString('en-US', {
+          month: 'long',
+          year: 'numeric',
+        })}. Only one challenge is allowed per month.`,
+      });
+    }
+
+    // Validate badge data is provided (required for each challenge)
+    if (
+      !badgeData ||
+      !badgeData.name ||
+      !badgeData.imageUrl ||
+      !badgeData.price
+    ) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Badge information is required when creating a challenge. Each challenge must have exactly one badge.',
       });
     }
 
@@ -42,16 +63,14 @@ export const createChallenge = async (req, res) => {
         goLiveDate: new Date(goLiveDate),
         closingDate: new Date(closingDate),
         createdById: req.user.id,
-        badge: badgeData
-          ? {
-              create: {
-                name: badgeData.name,
-                description: badgeData.description,
-                imageUrl: badgeData.imageUrl,
-                price: parseFloat(badgeData.price),
-              },
-            }
-          : undefined,
+        badge: {
+          create: {
+            name: badgeData.name,
+            description: badgeData.description,
+            imageUrl: badgeData.imageUrl,
+            price: parseFloat(badgeData.price),
+          },
+        },
       },
       include: {
         badge: true,
@@ -67,7 +86,7 @@ export const createChallenge = async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Challenge created successfully',
+      message: 'Challenge and badge created successfully',
       data: challenge,
     });
   } catch (error) {
@@ -188,6 +207,9 @@ export const publishChallenge = async (req, res) => {
 
     const challenge = await prisma.monthlyChallenge.findUnique({
       where: { id: challengeId },
+      include: {
+        badge: true,
+      },
     });
 
     if (!challenge) {
@@ -197,17 +219,37 @@ export const publishChallenge = async (req, res) => {
       });
     }
 
+    // Check if challenge has a badge
+    if (!challenge.badge) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'Cannot publish challenge without a badge. Please create a badge first.',
+      });
+    }
+
     const updated = await prisma.monthlyChallenge.update({
       where: { id: challengeId },
       data: {
         isPublished: true,
         isActive: true,
       },
+      include: {
+        badge: true,
+      },
     });
+
+    // Send notification to all active teens
+    try {
+      await sendChallengeNotification(updated);
+    } catch (notificationError) {
+      console.error('Failed to send notifications:', notificationError);
+      // Don't fail the request if notifications fail
+    }
 
     res.json({
       success: true,
-      message: 'Challenge published successfully',
+      message: 'Challenge published successfully and notifications sent',
       data: updated,
     });
   } catch (error) {
@@ -225,12 +267,27 @@ export const deleteChallenge = async (req, res) => {
 
     const challenge = await prisma.monthlyChallenge.findUnique({
       where: { id: challengeId },
+      include: {
+        _count: {
+          select: {
+            progress: true,
+          },
+        },
+      },
     });
 
     if (!challenge) {
       return res.status(404).json({
         success: false,
         message: 'Challenge not found',
+      });
+    }
+
+    // Prevent deletion if challenge has participants
+    if (challenge._count.progress > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Cannot delete challenge with ${challenge._count.progress} participant(s). This would affect teen progress data.`,
       });
     }
 
@@ -593,6 +650,155 @@ export const getLeaderboard = async (req, res) => {
       success: false,
       message: 'Internal server error',
       error: error.message,
+    });
+  }
+};
+
+export const updateChallenge = async (req, res) => {
+  try {
+    const { challengeId } = req.params;
+    const {
+      theme,
+      instructions,
+      goLiveDate,
+      closingDate,
+      isPublished,
+      isActive,
+      badgeData,
+    } = req.body;
+
+    // Check if challenge exists
+    const existing = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+      include: { badge: true },
+    });
+
+    if (!existing) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    // Prepare update data
+    const updateData = {
+      ...(theme && { theme }),
+      ...(instructions && { instructions }),
+      ...(goLiveDate && { goLiveDate: new Date(goLiveDate) }),
+      ...(closingDate && { closingDate: new Date(closingDate) }),
+      ...(typeof isPublished === 'boolean' && { isPublished }),
+      ...(typeof isActive === 'boolean' && { isActive }),
+    };
+
+    // Handle badge update/create
+    if (badgeData) {
+      if (existing.badge) {
+        // Update existing badge
+        updateData.badge = {
+          update: {
+            name: badgeData.name,
+            description: badgeData.description,
+            imageUrl: badgeData.imageUrl,
+            price: parseFloat(badgeData.price),
+          },
+        };
+      } else {
+        // Create new badge if none exists
+        updateData.badge = {
+          create: {
+            name: badgeData.name,
+            description: badgeData.description,
+            imageUrl: badgeData.imageUrl,
+            price: parseFloat(badgeData.price),
+          },
+        };
+      }
+    }
+
+    const challenge = await prisma.monthlyChallenge.update({
+      where: { id: challengeId },
+      data: updateData,
+      include: {
+        badge: true,
+        createdBy: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        _count: {
+          select: {
+            tasks: true,
+          },
+        },
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Challenge updated successfully',
+      data: challenge,
+    });
+  } catch (error) {
+    console.error('Update challenge error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const toggleChallengeStatus = async (req, res) => {
+  try {
+    const { challengeId } = req.params;
+    const { field } = req.body; // 'isPublished' or 'isActive'
+
+    if (!['isPublished', 'isActive'].includes(field)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid field. Use isPublished or isActive',
+      });
+    }
+
+    const challenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+      include: { badge: true },
+    });
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    // If trying to publish, ensure badge exists
+    if (field === 'isPublished' && !challenge.isPublished && !challenge.badge) {
+      return res.status(400).json({
+        success: false,
+        message: 'Cannot publish challenge without a badge',
+      });
+    }
+
+    const updated = await prisma.monthlyChallenge.update({
+      where: { id: challengeId },
+      data: {
+        [field]: !challenge[field],
+      },
+    });
+
+    res.json({
+      success: true,
+      message: `Challenge ${field} toggled successfully`,
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Toggle challenge status error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
     });
   }
 };

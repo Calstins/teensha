@@ -8,15 +8,12 @@ import prisma from './lib/prisma.js';
 import { errorHandler } from './middleware/errorHandler.js';
 
 // Import routes
-import authRoutes from './routes/authRoutes.js';
-import challengeRoutes from './routes/challengeRoutes.js';
-import taskRoutes from './routes/taskRoutes.js';
-import submissionRoutes from './routes/submissionRoutes.js';
-import badgeRoutes from './routes/badgeRoutes.js';
-import teenRoutes from './routes/teenRoutes.js';
-import progressRoutes from './routes/progessRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import authRoutes from './routes/authRoutes.js';
+import badgeRoutes from './routes/badgeRoutes.js';
+import progressRoutes from './routes/progessRoutes.js';
 import raffleRoutes from './routes/raffleRoutes.js';
+import teenRoutes from './routes/teenRoutes.js';
 
 dotenv.config();
 
@@ -29,7 +26,11 @@ app.locals.prisma = prisma;
 app.use(helmet());
 app.use(
   cors({
-    origin: ['https://teenshapersadmin.vercel.app', 'http://localhost:3000'],
+    origin: [
+      'https://teenshapersadmin.vercel.app',
+      'http://localhost:3000',
+      'http://localhost:3001',
+    ],
     credentials: true,
   })
 );
@@ -39,22 +40,26 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 // Routes
 app.use('/api/auth', authRoutes);
-app.use('/api/challenges', challengeRoutes);
-app.use('/api/tasks', taskRoutes);
-app.use('/api/submissions', submissionRoutes);
-app.use('/api/badges', badgeRoutes);
-app.use('/api/teens', teenRoutes);
-app.use('/api/progress', progressRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/teen', teenRoutes);
+app.use('/api/badges', badgeRoutes);
+app.use('/api/progress', progressRoutes);
 app.use('/api/raffle', raffleRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
-    message: 'TeenShapers API is live on Vercel!',
+    message: 'TeenShapers API is live!',
     status: 'deployed',
     timestamp: new Date().toISOString(),
-    documentation: 'Visit /api/test for more details',
+    endpoints: {
+      auth: '/api/auth',
+      admin: '/api/admin',
+      teen: '/api/teen',
+      badges: '/api/badges',
+      progress: '/api/progress',
+      raffle: '/api/raffle',
+    },
   });
 });
 
@@ -100,18 +105,20 @@ app.use((req, res) => {
 // Global error handler (must be last)
 app.use(errorHandler);
 
-// ADD THIS SECTION - Start the server
+// Start server
 const PORT = process.env.PORT || 4000;
 
 if (process.env.NODE_ENV !== 'production') {
-  // Only start server in development (not on Vercel)
   const server = app.listen(PORT, () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📊 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
+    console.log(`\n📋 Available routes:`);
+    console.log(`   Auth: http://localhost:${PORT}/api/auth`);
+    console.log(`   Admin: http://localhost:${PORT}/api/admin`);
+    console.log(`   Teen: http://localhost:${PORT}/api/teen`);
   });
 
-  // Graceful shutdown for development
   const gracefulShutdown = async (signal) => {
     console.log(`\n📴 Received ${signal}. Shutting down gracefully...`);
     server.close(async () => {
@@ -130,5 +137,4 @@ if (process.env.NODE_ENV !== 'production') {
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
-// Export for Vercel
 export default app;

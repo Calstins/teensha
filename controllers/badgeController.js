@@ -17,6 +17,7 @@ export const createBadge = async (req, res) => {
     // Check if challenge exists
     const challenge = await prisma.monthlyChallenge.findUnique({
       where: { id: challengeId },
+      include: { badge: true },
     });
 
     if (!challenge) {
@@ -27,14 +28,10 @@ export const createBadge = async (req, res) => {
     }
 
     // Check if badge already exists for this challenge
-    const existing = await prisma.badge.findUnique({
-      where: { challengeId },
-    });
-
-    if (existing) {
+    if (challenge.badge) {
       return res.status(400).json({
         success: false,
-        message: 'Badge already exists for this challenge',
+        message: `A badge already exists for this challenge (${challenge.theme}). Each challenge can only have one badge. Please update the existing badge instead.`,
       });
     }
 
@@ -250,7 +247,7 @@ export const deleteBadge = async (req, res) => {
     if (purchaseCount > 0) {
       return res.status(400).json({
         success: false,
-        message: 'Cannot delete badge that has been purchased',
+        message: `Cannot delete badge that has been purchased by ${purchaseCount} teen(s). This would affect their progress and raffle eligibility.`,
       });
     }
 
@@ -552,43 +549,3 @@ export const getBadgeStats = async (req, res) => {
     });
   }
 };
-
-// Helper function (same as in submissions controller)
-async function updateRaffleEligibility(teenId, year) {
-  try {
-    const purchasedBadges = await prisma.teenBadge.count({
-      where: {
-        teenId,
-        status: {
-          in: ['PURCHASED', 'EARNED'],
-        },
-        badge: {
-          challenge: {
-            year,
-          },
-        },
-      },
-    });
-
-    const isEligible = purchasedBadges === 12;
-
-    await prisma.raffleEntry.upsert({
-      where: {
-        teenId_year: {
-          teenId,
-          year,
-        },
-      },
-      update: {
-        isEligible,
-      },
-      create: {
-        teenId,
-        year,
-        isEligible,
-      },
-    });
-  } catch (error) {
-    console.error('Update raffle eligibility error:', error);
-  }
-}

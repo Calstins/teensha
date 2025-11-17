@@ -1,39 +1,72 @@
+// routes/teenRoutes.js
 import express from 'express';
-import {
-  validateName,
-  validateAge,
-  validatePagination,
-} from '../utils/validation.js';
+import { body, param } from 'express-validator';
+import { authenticateTeen } from '../middleware/auth.js';
 import { handleValidationErrors } from '../middleware/validation.js';
-import { authenticateTeen, authenticateUser } from '../middleware/auth.js';
+import { upload } from '../utils/multerConfig.js';
+
 import {
-  getProfile,
-  updateProfile,
-  getDashboard,
-  getTeensList,
-  getTeenDetails,
-} from '../controllers/teenController.js';
+  getCurrentChallenge,
+  getCommunityStats,
+  getLeaderboard,
+} from '../controllers/challengeController.js';
+
+import { getTaskDetails } from '../controllers/taskController.js';
+
+import {
+  submitTaskResponse,
+  getMySubmissions,
+} from '../controllers/submissionController.js';
+
+import { purchaseBadge, getMyBadges } from '../controllers/badgeController.js';
 
 const router = express.Router();
 
-// Get teen profile
-router.get('/profile', authenticateTeen, getProfile);
+// ============================================
+// CHALLENGE ROUTES (TEEN-FACING)
+// ============================================
 
-// Update teen profile
-router.patch(
-  '/profile',
+router.get('/challenges/current', authenticateTeen, getCurrentChallenge);
+router.get('/challenges/stats', authenticateTeen, getCommunityStats);
+router.get('/challenges/leaderboard', authenticateTeen, getLeaderboard);
+
+// ============================================
+// TASK ROUTES (TEEN-FACING)
+// ============================================
+
+router.get(
+  '/tasks/:taskId',
   authenticateTeen,
-  [validateName.optional(), validateAge.optional(), handleValidationErrors],
-  updateProfile
+  [param('taskId').isMongoId()],
+  handleValidationErrors,
+  getTaskDetails
 );
 
-// Get teen's dashboard summary
-router.get('/dashboard', authenticateTeen, getDashboard);
+// ============================================
+// SUBMISSION ROUTES (TEEN-FACING)
+// ============================================
 
-// Admin: Get teen list with filters
-router.get('/', authenticateUser, validatePagination, getTeensList);
+router.post(
+  '/submissions',
+  authenticateTeen,
+  upload.array('files', 5),
+  submitTaskResponse
+);
 
-// Admin: Get detailed teen profile
-router.get('/:teenId', authenticateUser, getTeenDetails);
+router.get('/submissions/my-submissions', authenticateTeen, getMySubmissions);
+
+// ============================================
+// BADGE ROUTES (TEEN-FACING)
+// ============================================
+
+router.post(
+  '/badges/purchase',
+  authenticateTeen,
+  [body('badgeId').isMongoId()],
+  handleValidationErrors,
+  purchaseBadge
+);
+
+router.get('/badges/my-badges', authenticateTeen, getMyBadges);
 
 export default router;

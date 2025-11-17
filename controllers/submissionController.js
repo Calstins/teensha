@@ -1,32 +1,37 @@
 // controllers/submissionController.js
 import { validationResult } from 'express-validator';
-import prisma from '../lib/prisma.js';
-import { uploadToCloudinary } from '../utils/fileUpload.js';
 import {
   updateTeenProgressHelper,
   updateRaffleEligibilityHelper,
 } from '../utils/helpers.js';
-import { handleValidationErrors } from '../middleware/validation.js';
+import {
+  handleValidationErrors,
+  validateTextSubmission,
+  validateVideoSubmission,
+  detectVideoPlatform,
+  validateQuizSubmission,
+  validateFormSubmission,
+  validatePickOneSubmission,
+  validateChecklistSubmission,
+} from '../middleware/validation.js';
+import prisma from '../lib/prisma.js';
+import { uploadToCloudinary } from '../utils/fileUpload.js';
+
+// ============================================
+// TEEN-FACING ENDPOINTS
+// ============================================
 
 export const submitTaskResponse = async (req, res) => {
   try {
-    handleValidationErrors(req, res, () => {});
-
     const { taskId, content } = req.body;
+    const teenId = req.teen.id;
     const files = req.files || [];
 
     // Get task details
     const task = await prisma.task.findUnique({
       where: { id: taskId },
       include: {
-        challenge: {
-          select: {
-            isPublished: true,
-            isActive: true,
-            goLiveDate: true,
-            closingDate: true,
-          },
-        },
+        challenge: true,
       },
     });
 
@@ -51,173 +56,184 @@ export const submitTaskResponse = async (req, res) => {
       });
     }
 
-    // Upload files using utility
-    const fileUrls = [];
-    for (const file of files) {
-      try {
-        const resourceType = file.mimetype.startsWith('video/')
-          ? 'video'
-          : 'image';
-        const url = await uploadToCloudinary(
-          file.buffer,
-          file.originalname,
-          resourceType
-        );
-        fileUrls.push(url);
-      } catch (uploadError) {
-        console.error('File upload error:', uploadError);
-        return res.status(500).json({
-          success: false,
-          message: 'File upload failed',
-        });
-      }
+    // Check if submission already exists
+    const existingSubmission = await prisma.submission.findUnique({
+      where: {
+        taskId_teenId: {
+          taskId,
+          teenId,
+        },
+      },
+    });
+
+    // Validate and process submission based on task type
+    let processedContent;
+    let fileUrls = [];
+    let validationError = null;
+
+    switch (task.taskType) {
+      case 'TEXT':
+        validationError = validateTextSubmission(content);
+        processedContent = { text: content };
+        break;
+
+      case 'IMAGE':
+        if (files.length === 0) {
+          validationError = 'At least one image file is required';
+        } else {
+          // Upload images to Cloudinary
+          for (const file of files) {
+            const url = await uploadToCloudinary(
+              file.buffer,
+              file.originalname,
+              'image'
+            );
+            fileUrls.push(url);
+          }
+          processedContent = {
+            description: content || '',
+            imageCount: fileUrls.length,
+          };
+        }
+        break;
+
+      case 'VIDEO':
+        validationError = validateVideoSubmission(content);
+        processedContent = {
+          videoUrl: content,
+          platform: detectVideoPlatform(content),
+        };
+        break;
+
+      case 'QUIZ':
+        validationError = validateQuizSubmission(content, task.options);
+        if (!validationError) {
+          processedContent = {
+            answers: JSON.parse(content),
+            submittedAt: new Date().toISOString(),
+          };
+        }
+        break;
+
+      case 'FORM':
+        validationError = validateFormSubmission(content, task.options);
+        if (!validationError) {
+          processedContent = {
+            responses: JSON.parse(content),
+            submittedAt: new Date().toISOString(),
+          };
+        }
+        break;
+
+      case 'PICK_ONE':
+        validationError = validatePickOneSubmission(content, task.options);
+        if (!validationError) {
+          processedContent = {
+            selectedOption: content,
+            submittedAt: new Date().toISOString(),
+          };
+        }
+        break;
+
+      case 'CHECKLIST':
+        validationError = validateChecklistSubmission(content, task.options);
+        if (!validationError) {
+          processedContent = {
+            checkedItems: JSON.parse(content),
+            submittedAt: new Date().toISOString(),
+          };
+        }
+        break;
+
+      default:
+        validationError = 'Invalid task type';
     }
 
-    // Parse content
-    let parsedContent = {};
-    try {
-      if (typeof content === 'string') {
-        parsedContent = JSON.parse(content);
-      } else {
-        parsedContent = content || {};
-      }
-    } catch (parseError) {
-      parsedContent = { text: content };
+    if (validationError) {
+      return res.status(400).json({
+        success: false,
+        message: validationError,
+      });
     }
 
     // Create or update submission
-    const submission = await prisma.submission.upsert({
-      where: {
-        taskId_teenId: {
-          taskId: task.id,
-          teenId: req.teen.id,
-        },
-      },
-      update: {
-        content: parsedContent,
-        fileUrls,
-        submittedAt: new Date(),
-        status: 'APPROVED',
-      },
-      create: {
-        taskId: task.id,
-        teenId: req.teen.id,
-        content: parsedContent,
-        fileUrls,
-        status: 'APPROVED',
-      },
-    });
+    const submission = existingSubmission
+      ? await prisma.submission.update({
+          where: { id: existingSubmission.id },
+          data: {
+            content: processedContent,
+            fileUrls,
+            status: 'APPROVED', // Auto-approve by default
+            submittedAt: new Date(),
+          },
+          include: {
+            task: {
+              select: {
+                id: true,
+                title: true,
+                tabName: true,
+                taskType: true,
+              },
+            },
+          },
+        })
+      : await prisma.submission.create({
+          data: {
+            taskId,
+            teenId,
+            content: processedContent,
+            fileUrls,
+            status: 'APPROVED', // Auto-approve by default
+          },
+          include: {
+            task: {
+              select: {
+                id: true,
+                title: true,
+                tabName: true,
+                taskType: true,
+              },
+            },
+          },
+        });
 
-    // Update teen's progress using helper
-    await updateTeenProgressHelper(req.teen.id, task.challengeId);
+    // Update teen progress
+    await updateTeenProgressHelper(teenId, task.challengeId);
 
-    res.json({
+    res.status(existingSubmission ? 200 : 201).json({
       success: true,
-      message: 'Submission created successfully',
-      data: {
-        submission: {
-          id: submission.id,
-          content: submission.content,
-          fileUrls: submission.fileUrls,
-          status: submission.status,
-          submittedAt: submission.submittedAt,
-        },
-      },
+      message: existingSubmission
+        ? 'Submission updated successfully'
+        : 'Submission created successfully',
+      data: submission,
     });
   } catch (error) {
-    console.error('Submit task error:', error);
+    console.error('Submit task response error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };
 
 export const getMySubmissions = async (req, res) => {
   try {
-    const currentDate = new Date();
+    const teenId = req.teen.id;
+    const { challengeId, status, taskType } = req.query;
 
-    const challenge = await prisma.monthlyChallenge.findFirst({
-      where: {
-        isPublished: true,
-        isActive: true,
-        goLiveDate: { lte: currentDate },
-        closingDate: { gte: currentDate },
-      },
-    });
+    const where = { teenId };
 
-    if (!challenge) {
-      return res.json({
-        success: true,
-        data: [],
-      });
-    }
-
-    const submissions = await prisma.submission.findMany({
-      where: {
-        teenId: req.teen.id,
-        task: {
-          challengeId: challenge.id,
-        },
-      },
-      include: {
-        task: {
-          select: {
-            id: true,
-            title: true,
-            tabName: true,
-            taskType: true,
-          },
-        },
-      },
-      orderBy: {
-        submittedAt: 'desc',
-      },
-    });
-
-    res.json({
-      success: true,
-      data: submissions.map((sub) => ({
-        id: sub.id,
-        task: sub.task,
-        content: sub.content,
-        fileUrls: sub.fileUrls,
-        status: sub.status,
-        submittedAt: sub.submittedAt,
-      })),
-    });
-  } catch (error) {
-    console.error('Get submissions error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Internal server error',
-    });
-  }
-};
-
-export const getReviewQueue = async (req, res) => {
-  try {
-    const {
-      page = 1,
-      limit = 20,
-      status,
-      challengeId,
-      search,
-      taskType,
-    } = req.query;
-    const skip = (page - 1) * limit;
-
-    const where = {};
-
-    // Status filter
-    if (status) where.status = status;
-
-    // Challenge filter
     if (challengeId) {
-      where.task = { challengeId };
+      where.task = {
+        challengeId,
+      };
     }
 
-    // Task type filter
+    if (status) {
+      where.status = status;
+    }
+
     if (taskType) {
       where.task = {
         ...where.task,
@@ -225,68 +241,16 @@ export const getReviewQueue = async (req, res) => {
       };
     }
 
-    // Search filter - search across teen name, task title, and challenge theme
-    if (search) {
-      where.OR = [
-        // Search by teen name
-        {
-          teen: {
-            name: {
-              contains: search,
-              mode: 'insensitive',
-            },
-          },
-        },
-        // Search by teen email
-        {
-          teen: {
-            email: {
-              contains: search,
-              mode: 'insensitive',
-            },
-          },
-        },
-        // Search by task title
-        {
-          task: {
-            title: {
-              contains: search,
-              mode: 'insensitive',
-            },
-          },
-        },
-        // Search by challenge theme
-        {
-          task: {
-            challenge: {
-              theme: {
-                contains: search,
-                mode: 'insensitive',
-              },
-            },
-          },
-        },
-      ];
-    }
-
     const submissions = await prisma.submission.findMany({
       where,
       include: {
-        teen: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            profilePhoto: true,
-          },
-        },
         task: {
           select: {
             id: true,
             title: true,
-            taskType: true,
-            tabName: true,
             description: true,
+            tabName: true,
+            taskType: true,
             maxScore: true,
             challenge: {
               select: {
@@ -302,21 +266,107 @@ export const getReviewQueue = async (req, res) => {
       orderBy: {
         submittedAt: 'desc',
       },
-      skip,
-      take: parseInt(limit),
     });
 
-    const total = await prisma.submission.count({ where });
+    res.json({
+      success: true,
+      data: {
+        submissions,
+        total: submissions.length,
+      },
+    });
+  } catch (error) {
+    console.error('Get my submissions error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+// ============================================
+// ADMIN/STAFF ENDPOINTS
+// ============================================
+
+export const getReviewQueue = async (req, res) => {
+  try {
+    const {
+      status = 'PENDING',
+      challengeId,
+      taskType,
+      page = 1,
+      limit = 20,
+    } = req.query;
+
+    const where = {};
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (challengeId || taskType) {
+      where.task = {};
+      if (challengeId) where.task.challengeId = challengeId;
+      if (taskType) where.task.taskType = taskType;
+    }
+
+    const skip = (parseInt(page) - 1) * parseInt(limit);
+
+    const [submissions, total] = await Promise.all([
+      prisma.submission.findMany({
+        where,
+        include: {
+          task: {
+            select: {
+              id: true,
+              title: true,
+              tabName: true,
+              taskType: true,
+              maxScore: true,
+              challenge: {
+                select: {
+                  id: true,
+                  theme: true,
+                  year: true,
+                  month: true,
+                },
+              },
+            },
+          },
+          teen: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              profilePhoto: true,
+            },
+          },
+          reviewer: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: {
+          submittedAt: 'asc',
+        },
+        skip,
+        take: parseInt(limit),
+      }),
+      prisma.submission.count({ where }),
+    ]);
 
     res.json({
       success: true,
       data: {
         submissions,
         pagination: {
+          total,
           page: parseInt(page),
           limit: parseInt(limit),
-          total,
-          pages: Math.ceil(total / limit),
+          totalPages: Math.ceil(total / parseInt(limit)),
         },
       },
     });
@@ -331,24 +381,145 @@ export const getReviewQueue = async (req, res) => {
 
 export const reviewSubmission = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const { submissionId } = req.params;
+    const { status, score, reviewNote } = req.body;
+
+    // Validate status
+    if (!['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
       return res.status(400).json({
         success: false,
-        message: 'Validation failed',
-        errors: errors.array(),
+        message: 'Invalid status',
       });
     }
-
-    const { submissionId } = req.params;
-    const { score, reviewNote, status } = req.body;
 
     const submission = await prisma.submission.findUnique({
       where: { id: submissionId },
       include: {
         task: {
-          include: {
-            challenge: true,
+          select: {
+            maxScore: true,
+            challengeId: true,
+          },
+        },
+        teen: true,
+      },
+    });
+
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'Submission not found',
+      });
+    }
+
+    // Validate score if provided
+    if (score !== undefined) {
+      if (score < 0 || score > submission.task.maxScore) {
+        return res.status(400).json({
+          success: false,
+          message: `Score must be between 0 and ${submission.task.maxScore}`,
+        });
+      }
+    }
+
+    const updated = await prisma.submission.update({
+      where: { id: submissionId },
+      data: {
+        status,
+        score: score !== undefined ? parseInt(score) : submission.score,
+        reviewNote,
+        reviewerId: req.user.id,
+        reviewedAt: new Date(),
+      },
+      include: {
+        task: {
+          select: {
+            id: true,
+            title: true,
+            tabName: true,
+            taskType: true,
+            maxScore: true,
+          },
+        },
+        teen: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+        reviewer: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    // Update teen progress after review
+    await updateTeenProgressHelper(
+      submission.teen.id,
+      submission.task.challengeId
+    );
+
+    res.json({
+      success: true,
+      message: 'Submission reviewed successfully',
+      data: updated,
+    });
+  } catch (error) {
+    console.error('Review submission error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const getSubmissionById = async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+
+    const submission = await prisma.submission.findUnique({
+      where: { id: submissionId },
+      include: {
+        task: {
+          select: {
+            id: true,
+            title: true,
+            description: true,
+            tabName: true,
+            taskType: true,
+            options: true,
+            maxScore: true,
+            challenge: {
+              select: {
+                id: true,
+                theme: true,
+                year: true,
+                month: true,
+              },
+            },
+          },
+        },
+        teen: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            profilePhoto: true,
+            age: true,
+            state: true,
+            country: true,
+          },
+        },
+        reviewer: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
           },
         },
       },
@@ -361,24 +532,57 @@ export const reviewSubmission = async (req, res) => {
       });
     }
 
-    const updatedSubmission = await prisma.submission.update({
+    res.json({
+      success: true,
+      data: submission,
+    });
+  } catch (error) {
+    console.error('Get submission error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};
+
+export const deleteSubmission = async (req, res) => {
+  try {
+    const { submissionId } = req.params;
+
+    const submission = await prisma.submission.findUnique({
       where: { id: submissionId },
-      data: {
-        ...(score !== undefined && { score }),
-        ...(reviewNote && { reviewNote }),
-        ...(status && { status }),
-        reviewerId: req.user.id,
-        reviewedAt: new Date(),
+      include: {
+        task: {
+          select: {
+            challengeId: true,
+          },
+        },
       },
     });
 
+    if (!submission) {
+      return res.status(404).json({
+        success: false,
+        message: 'Submission not found',
+      });
+    }
+
+    await prisma.submission.delete({
+      where: { id: submissionId },
+    });
+
+    // Update teen progress after deletion
+    await updateTeenProgressHelper(
+      submission.teenId,
+      submission.task.challengeId
+    );
+
     res.json({
       success: true,
-      message: 'Submission reviewed successfully',
-      data: updatedSubmission,
+      message: 'Submission deleted successfully',
     });
   } catch (error) {
-    console.error('Review submission error:', error);
+    console.error('Delete submission error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
