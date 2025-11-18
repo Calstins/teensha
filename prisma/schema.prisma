@@ -79,6 +79,8 @@ model Teen {
   badges        TeenBadge[]
   progress      TeenProgress[]
   raffleEntries RaffleEntry[]
+  pushToken     PushToken?
+  notifications Notification[]
 
   @@map("teens")
 }
@@ -228,4 +230,30 @@ model RaffleDraw {
   createdAt   DateTime  @default(now())
 
   @@map("raffle_draws")
+}
+
+model PushToken {
+  id         String   @id @default(auto()) @map("_id") @db.ObjectId
+  teenId     String   @unique @db.ObjectId
+  token      String
+  deviceType String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  teen       Teen     @relation(fields: [teenId], references: [id], onDelete: Cascade)
+
+  @@map("push_tokens")
+}
+
+model Notification {
+  id        String   @id @default(auto()) @map("_id") @db.ObjectId
+  teenId    String   @db.ObjectId
+  title     String
+  body      String
+  data      Json?
+  status    String   @default("SENT")
+  isRead    Boolean  @default(false)
+  createdAt DateTime @default(now())
+  teen      Teen     @relation(fields: [teenId], references: [id], onDelete: Cascade)
+
+  @@map("notifications")
 }

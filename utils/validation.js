@@ -17,8 +17,8 @@ export const validateName = body('name')
   .withMessage('Name must be between 2 and 50 characters');
 
 export const validateAge = body('age')
-  .isInt({ min: 12, max: 19 })
-  .withMessage('Age must be between 12 and 19');
+  .isInt({ min: 13, max: 19 })
+  .withMessage('Age must be between 13 and 19');
 
 export const validateObjectId = (field) =>
   param(field).isMongoId().withMessage(`Invalid ${field} format`);

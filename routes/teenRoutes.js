@@ -9,7 +9,16 @@ import {
   getCurrentChallenge,
   getCommunityStats,
   getLeaderboard,
+  getChallengeByIdForTeen, // Use only one of these
 } from '../controllers/challengeController.js';
+
+import {
+  registerPushToken,
+  unregisterPushToken,
+  getNotificationHistory,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
+} from '../controllers/notificationController.js';
 
 import { getTaskDetails } from '../controllers/taskController.js';
 
@@ -19,21 +28,49 @@ import {
 } from '../controllers/submissionController.js';
 
 import { purchaseBadge, getMyBadges } from '../controllers/badgeController.js';
+import {
+  getProfile,
+  updateProfile,
+  getDashboard,
+} from '../controllers/teenController.js';
 
 const router = express.Router();
 
 // ============================================
+// TEEN PROFILE ROUTES (PUT THESE FIRST)
+// ============================================
+router.get('/profile', authenticateTeen, getProfile);
+router.put(
+  '/profile',
+  authenticateTeen,
+  [
+    body('name').optional().isString().isLength({ min: 1 }),
+    body('email').optional().isEmail(),
+    body('age').optional().isInt({ min: 13 }),
+  ],
+  handleValidationErrors,
+  updateProfile
+);
+router.get('/dashboard', authenticateTeen, getDashboard);
+
+// ============================================
 // CHALLENGE ROUTES (TEEN-FACING)
 // ============================================
-
 router.get('/challenges/current', authenticateTeen, getCurrentChallenge);
 router.get('/challenges/stats', authenticateTeen, getCommunityStats);
 router.get('/challenges/leaderboard', authenticateTeen, getLeaderboard);
 
+router.get(
+  '/challenges/:challengeId',
+  authenticateTeen,
+  [param('challengeId').isMongoId()],
+  handleValidationErrors,
+  getChallengeByIdForTeen // Use the teen-specific version
+);
+
 // ============================================
 // TASK ROUTES (TEEN-FACING)
 // ============================================
-
 router.get(
   '/tasks/:taskId',
   authenticateTeen,
@@ -45,7 +82,6 @@ router.get(
 // ============================================
 // SUBMISSION ROUTES (TEEN-FACING)
 // ============================================
-
 router.post(
   '/submissions',
   authenticateTeen,
@@ -56,9 +92,27 @@ router.post(
 router.get('/submissions/my-submissions', authenticateTeen, getMySubmissions);
 
 // ============================================
+// NOTIFICATION ROUTES (TEEN-FACING)
+// ============================================
+router.post('/notifications/register', authenticateTeen, registerPushToken);
+router.post('/notifications/unregister', authenticateTeen, unregisterPushToken);
+router.get('/notifications/history', authenticateTeen, getNotificationHistory);
+router.patch(
+  '/notifications/:notificationId/read',
+  authenticateTeen,
+  [param('notificationId').isMongoId()],
+  handleValidationErrors,
+  markNotificationAsRead
+);
+router.patch(
+  '/notifications/read-all',
+  authenticateTeen,
+  markAllNotificationsAsRead
+);
+
+// ============================================
 // BADGE ROUTES (TEEN-FACING)
 // ============================================
-
 router.post(
   '/badges/purchase',
   authenticateTeen,

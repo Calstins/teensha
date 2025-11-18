@@ -3,6 +3,7 @@ import { validationResult } from 'express-validator';
 import prisma from '../lib/prisma.js';
 import { handleValidationErrors } from '../middleware/validation.js';
 import { sendChallengeNotification } from '../utils/notifications.js';
+import { sendNotificationToAllTeensMobile } from './notificationController.js';
 
 export const createChallenge = async (req, res) => {
   try {
@@ -250,6 +251,21 @@ export const publishChallenge = async (req, res) => {
     res.json({
       success: true,
       message: 'Challenge published successfully and notifications sent',
+      data: updated,
+    });
+
+    await sendNotificationToAllTeensMobile(
+      '🎯 New Challenge Available!',
+      `${updated.theme} is now live! Start earning your badge today.`,
+      {
+        type: 'CHALLENGE_PUBLISHED',
+        challengeId: updated.id,
+      }
+    );
+
+    res.json({
+      success: true,
+      message: 'Challenge published and notifications sent',
       data: updated,
     });
   } catch (error) {
@@ -799,6 +815,138 @@ export const toggleChallengeStatus = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+    });
+  }
+};
+
+// Add this function (teen-facing version of getChallengeById)
+export const getChallengeByIdForTeen = async (req, res) => {
+  try {
+    const { challengeId } = req.params;
+
+    const challenge = await prisma.monthlyChallenge.findUnique({
+      where: { id: challengeId },
+      include: {
+        badge: true,
+        tasks: {
+          orderBy: [{ tabName: 'asc' }, { createdAt: 'asc' }],
+        },
+      },
+    });
+
+    if (!challenge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Challenge not found',
+      });
+    }
+
+    // Check if challenge is published
+    if (!challenge.isPublished) {
+      return res.status(403).json({
+        success: false,
+        message: 'Challenge not available',
+      });
+    }
+
+    // Get teen's progress for this challenge
+    const progress = await prisma.teenProgress.findUnique({
+      where: {
+        teenId_challengeId: {
+          teenId: req.teen.id,
+          challengeId: challenge.id,
+        },
+      },
+    });
+
+    // Get teen's badge status
+    let teenBadge = null;
+    if (challenge.badge) {
+      teenBadge = await prisma.teenBadge.findUnique({
+        where: {
+          teenId_badgeId: {
+            teenId: req.teen.id,
+            badgeId: challenge.badge.id,
+          },
+        },
+      });
+    }
+
+    // Get submissions for this challenge
+    const submissions = await prisma.submission.findMany({
+      where: {
+        teenId: req.teen.id,
+        task: {
+          challengeId: challenge.id,
+        },
+      },
+      include: {
+        task: {
+          select: {
+            id: true,
+            title: true,
+            tabName: true,
+            taskType: true,
+          },
+        },
+      },
+    });
+
+    // Group tasks by tab with submission status
+    const tasksByTab = {};
+    for (const task of challenge.tasks) {
+      if (!tasksByTab[task.tabName]) {
+        tasksByTab[task.tabName] = [];
+      }
+
+      const submission = submissions.find((s) => s.task.id === task.id);
+      tasksByTab[task.tabName].push({
+        ...task,
+        submission: submission
+          ? {
+              id: submission.id,
+              status: submission.status,
+              submittedAt: submission.submittedAt,
+              score: submission.score,
+            }
+          : null,
+      });
+    }
+
+    res.json({
+      success: true,
+      data: {
+        challenge: {
+          id: challenge.id,
+          theme: challenge.theme,
+          instructions: challenge.instructions,
+          goLiveDate: challenge.goLiveDate,
+          closingDate: challenge.closingDate,
+          year: challenge.year,
+          month: challenge.month,
+        },
+        tasks: tasksByTab,
+        badge: challenge.badge
+          ? {
+              ...challenge.badge,
+              status: teenBadge?.status || 'AVAILABLE',
+              purchasedAt: teenBadge?.purchasedAt || null,
+              earnedAt: teenBadge?.earnedAt || null,
+            }
+          : null,
+        progress: progress || {
+          tasksTotal: challenge.tasks.length,
+          tasksCompleted: 0,
+          percentage: 0,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Get challenge by ID error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
     });
   }
 };
