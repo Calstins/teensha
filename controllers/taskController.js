@@ -298,19 +298,21 @@ export const getTaskDetails = async (req, res) => {
       });
     }
 
-    // Check if challenge is active
-    const currentDate = new Date();
-    if (
-      !task.challenge.isPublished ||
-      !task.challenge.isActive ||
-      task.challenge.goLiveDate > currentDate ||
-      task.challenge.closingDate < currentDate
-    ) {
+    // ✅ FIX: Only check if challenge is published
+    // Allow viewing tasks from past challenges
+    if (!task.challenge.isPublished) {
       return res.status(403).json({
         success: false,
-        message: 'Challenge is not currently active',
+        message: 'Challenge is not available',
       });
     }
+
+    // Check if challenge is currently open for NEW submissions
+    const currentDate = new Date();
+    const isChallengeOpen =
+      task.challenge.isActive &&
+      task.challenge.goLiveDate <= currentDate &&
+      task.challenge.closingDate >= currentDate;
 
     // Get teen's submission for this task
     const submission = await prisma.submission.findUnique({
@@ -333,6 +335,12 @@ export const getTaskDetails = async (req, res) => {
           dueDate: task.dueDate,
           options: task.options,
           tabName: task.tabName,
+        },
+        challenge: {
+          id: task.challenge.id,
+          theme: task.challenge.theme,
+          isOpen: isChallengeOpen, // ✅ Tell frontend if submissions are allowed
+          closingDate: task.challenge.closingDate,
         },
         submission: submission
           ? {
