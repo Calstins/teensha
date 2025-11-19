@@ -9,7 +9,7 @@ import {
   getCurrentChallenge,
   getCommunityStats,
   getLeaderboard,
-  getChallengeByIdForTeen, // Use only one of these
+  getChallengeByIdForTeen,
 } from '../controllers/challengeController.js';
 
 import {
@@ -19,6 +19,11 @@ import {
   markNotificationAsRead,
   markAllNotificationsAsRead,
 } from '../controllers/notificationController.js';
+
+import {
+  getRecentActivity,
+  getTopPerformers,
+} from '../controllers/communityController.js';
 
 import { getTaskDetails } from '../controllers/taskController.js';
 
@@ -37,7 +42,7 @@ import {
 const router = express.Router();
 
 // ============================================
-// TEEN PROFILE ROUTES (PUT THESE FIRST)
+// TEEN PROFILE ROUTES
 // ============================================
 router.get('/profile', authenticateTeen, getProfile);
 router.put(
@@ -65,8 +70,14 @@ router.get(
   authenticateTeen,
   [param('challengeId').isMongoId()],
   handleValidationErrors,
-  getChallengeByIdForTeen // Use the teen-specific version
+  getChallengeByIdForTeen
 );
+
+// ============================================
+// COMMUNITY ROUTES (NEW)
+// ============================================
+router.get('/community/activity', authenticateTeen, getRecentActivity);
+router.get('/community/top-performers', authenticateTeen, getTopPerformers);
 
 // ============================================
 // TASK ROUTES (TEEN-FACING)
