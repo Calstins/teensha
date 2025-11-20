@@ -1,6 +1,7 @@
 // utils/emailService.js
 // Complete email service for TeenShapers authentication
 // Handles verification emails, password reset emails, and welcome emails
+// Updated with TeenShapers brand colors and fonts
 
 import nodemailer from 'nodemailer';
 import jwt from 'jsonwebtoken';
@@ -11,19 +12,14 @@ import jwt from 'jsonwebtoken';
  */
 const createTransporter = () => {
   return nodemailer.createTransport({
-    service: process.env.EMAIL_SERVICE || 'gmail', // e.g., 'gmail', 'outlook', 'yahoo'
+    service: process.env.EMAIL_SERVICE || 'gmail',
     auth: {
       user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD, // Use App Password for Gmail
+      pass: process.env.EMAIL_PASSWORD,
     },
   });
 };
 
-/**
- * Generate email verification token
- * @param {string} teenId - Teen's email address (used as ID for verification)
- * @returns {string} JWT token valid for 24 hours
- */
 export const generateVerificationToken = (teenId) => {
   return jwt.sign(
     { id: teenId, type: 'email-verification' },
@@ -34,11 +30,6 @@ export const generateVerificationToken = (teenId) => {
   );
 };
 
-/**
- * Generate password reset token
- * @param {string} teenId - Teen's unique ID
- * @returns {string} JWT token valid for 1 hour
- */
 export const generatePasswordResetToken = (teenId) => {
   return jwt.sign(
     { id: teenId, type: 'password-reset' },
@@ -49,12 +40,6 @@ export const generatePasswordResetToken = (teenId) => {
   );
 };
 
-/**
- * Verify JWT token
- * @param {string} token - Token to verify
- * @returns {object} Decoded token data
- * @throws {Error} If token is invalid or expired
- */
 export const verifyToken = (token) => {
   try {
     return jwt.verify(token, process.env.JWT_SECRET);
@@ -63,14 +48,160 @@ export const verifyToken = (token) => {
   }
 };
 
-/**
- * Send email verification link to user
- * @param {string} email - Recipient email address
- * @param {string} name - User's name for personalization
- * @param {string} verificationToken - JWT verification token
- * @returns {Promise<void>}
- * @throws {Error} If email sending fails
- */
+const getEmailStyles = () => `
+  body {
+    font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, Roboto, 'Helvetica Neue', Arial, sans-serif;
+    line-height: 1.6;
+    color: #111827;
+    margin: 0;
+    padding: 0;
+    background-color: #F9FAFB;
+  }
+  .container {
+    max-width: 600px;
+    margin: 20px auto;
+    background: #FFFFFF;
+    border-radius: 16px;
+    overflow: hidden;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+  }
+  .header {
+    background: linear-gradient(135deg, #FF6B35 0%, #E6542A 100%);
+    color: white;
+    padding: 40px 30px;
+    text-align: center;
+  }
+  .header h1 {
+    margin: 0;
+    font-family: 'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', sans-serif;
+    font-size: 28px;
+    font-weight: 800;
+  }
+  .content {
+    padding: 40px 30px;
+  }
+  .content h2 {
+    color: #111827;
+    font-family: 'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    margin-top: 0;
+  }
+  .content p {
+    color: #4B5563;
+    font-size: 16px;
+    margin: 15px 0;
+  }
+  .button {
+    display: inline-block;
+    padding: 15px 40px;
+    background: linear-gradient(135deg, #FF6B35 0%, #E6542A 100%);
+    color: white !important;
+    text-decoration: none;
+    border-radius: 12px;
+    font-weight: 700;
+    font-size: 16px;
+    margin: 25px 0;
+    transition: transform 0.2s;
+    box-shadow: 0 2px 4px rgba(255, 107, 53, 0.3);
+  }
+  .button:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 4px 8px rgba(255, 107, 53, 0.4);
+  }
+  .link-text {
+    word-break: break-all;
+    color: #FF6B35;
+    font-size: 14px;
+    background: #FFF5F2;
+    padding: 12px;
+    border-radius: 8px;
+    margin: 15px 0;
+    border: 1px solid #FFEBE4;
+  }
+  .warning {
+    background: #FFFBEB;
+    border-left: 4px solid #F59E0B;
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 8px;
+  }
+  .warning p {
+    margin: 0;
+    color: #92400E;
+    font-size: 14px;
+  }
+  .warning-title {
+    font-weight: 700;
+    color: #92400E;
+    margin: 0 0 10px 0;
+  }
+  .warning ul {
+    margin: 10px 0;
+    padding-left: 20px;
+    color: #92400E;
+  }
+  .warning li {
+    margin: 5px 0;
+  }
+  .feature {
+    background: #FFF5F2;
+    padding: 20px;
+    margin: 15px 0;
+    border-radius: 12px;
+    border-left: 4px solid #FF6B35;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  }
+  .feature-title {
+    color: #FF6B35;
+    font-weight: 700;
+    font-size: 18px;
+    margin: 0 0 8px 0;
+    font-family: 'Trebuchet MS', 'Lucida Grande', 'Lucida Sans Unicode', sans-serif;
+  }
+  .feature p {
+    margin: 0;
+    color: #4B5563;
+    font-size: 15px;
+  }
+  .stats {
+    background: #FFEBE4;
+    padding: 20px;
+    border-radius: 12px;
+    margin: 20px 0;
+    text-align: center;
+    border: 2px solid #FFD6C7;
+  }
+  .stats p {
+    margin: 5px 0;
+    color: #4B5563;
+    font-size: 14px;
+  }
+  .footer {
+    text-align: center;
+    padding: 20px 30px;
+    background: #F9FAFB;
+    color: #6B7280;
+    font-size: 14px;
+  }
+  .footer p {
+    margin: 5px 0;
+  }
+  @media only screen and (max-width: 600px) {
+    .container {
+      margin: 10px;
+    }
+    .header, .content, .footer {
+      padding: 20px 15px;
+    }
+    .button {
+      display: block;
+      width: 100%;
+      text-align: center;
+    }
+  }
+`;
+
 export const sendVerificationEmail = async (email, name, verificationToken) => {
   const transporter = createTransporter();
 
@@ -89,105 +220,7 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              margin: 0;
-              padding: 0;
-              background-color: #f4f4f4;
-            }
-            .container {
-              max-width: 600px;
-              margin: 20px auto;
-              background: #ffffff;
-              border-radius: 10px;
-              overflow: hidden;
-              box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-              padding: 40px 30px;
-              text-align: center;
-            }
-            .header h1 {
-              margin: 0;
-              font-size: 28px;
-              font-weight: 700;
-            }
-            .content {
-              padding: 40px 30px;
-            }
-            .content h2 {
-              color: #333;
-              font-size: 22px;
-              margin-top: 0;
-            }
-            .content p {
-              color: #555;
-              font-size: 16px;
-              margin: 15px 0;
-            }
-            .button {
-              display: inline-block;
-              padding: 15px 40px;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white !important;
-              text-decoration: none;
-              border-radius: 8px;
-              font-weight: 600;
-              font-size: 16px;
-              margin: 25px 0;
-              transition: transform 0.2s;
-            }
-            .button:hover {
-              transform: translateY(-2px);
-            }
-            .link-text {
-              word-break: break-all;
-              color: #667eea;
-              font-size: 14px;
-              background: #f0f0f0;
-              padding: 12px;
-              border-radius: 6px;
-              margin: 15px 0;
-            }
-            .warning {
-              background: #fff3cd;
-              border-left: 4px solid #ffc107;
-              padding: 15px;
-              margin: 20px 0;
-              border-radius: 4px;
-            }
-            .warning p {
-              margin: 0;
-              color: #856404;
-              font-size: 14px;
-            }
-            .footer {
-              text-align: center;
-              padding: 20px 30px;
-              background: #f9f9f9;
-              color: #666;
-              font-size: 14px;
-            }
-            .footer p {
-              margin: 5px 0;
-            }
-            @media only screen and (max-width: 600px) {
-              .container {
-                margin: 10px;
-              }
-              .header, .content, .footer {
-                padding: 20px 15px;
-              }
-              .button {
-                display: block;
-                width: 100%;
-                text-align: center;
-              }
-            }
+            ${getEmailStyles()}
           </style>
         </head>
         <body>
@@ -204,7 +237,7 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
                 <a href="${verificationUrl}" class="button">Verify Email Address</a>
               </center>
               
-              <p style="color: #666; font-size: 14px; margin-top: 25px;">Or copy and paste this link into your browser:</p>
+              <p style="color: #6B7280; font-size: 14px; margin-top: 25px;">Or copy and paste this link into your browser:</p>
               <div class="link-text">${verificationUrl}</div>
               
               <div class="warning">
@@ -212,7 +245,7 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
               </div>
               
               <p>Once verified, you'll be able to:</p>
-              <ul style="color: #555; line-height: 1.8;">
+              <ul style="color: #4B5563; line-height: 1.8;">
                 <li>🎯 Participate in monthly challenges</li>
                 <li>🏆 Earn badges and rewards</li>
                 <li>📊 Track your progress</li>
@@ -222,9 +255,9 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
               <p style="margin-top: 25px;">If you didn't create an account with TeenShapers, please ignore this email or contact our support team.</p>
             </div>
             <div class="footer">
-              <p><strong>TeenShapers</strong></p>
+              <p><strong style="color: #FF6B35;">TeenShapers</strong></p>
               <p>Shaping the future, one teen at a time</p>
-              <p style="margin-top: 15px; color: #999;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
+              <p style="margin-top: 15px; color: #9CA3AF;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -257,14 +290,6 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
   }
 };
 
-/**
- * Send password reset link to user
- * @param {string} email - Recipient email address
- * @param {string} name - User's name for personalization
- * @param {string} resetToken - JWT password reset token
- * @returns {Promise<void>}
- * @throws {Error} If email sending fails
- */
 export const sendPasswordResetEmail = async (email, name, resetToken) => {
   const transporter = createTransporter();
 
@@ -273,7 +298,7 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
   // Fallback web URL
   const webResetUrl = `${
     process.env.APP_URL || 'https://teensha.vercel.app'
-  }/api/auth/reset-password?token=${resetToken}`;
+  }/reset-password?token=${resetToken}`;
 
   const mailOptions = {
     from: `"TeenShapers" <${process.env.EMAIL_USER}>`,
@@ -286,113 +311,7 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              margin: 0;
-              padding: 0;
-              background-color: #f4f4f4;
-            }
-            .container {
-              max-width: 600px;
-              margin: 20px auto;
-              background: #ffffff;
-              border-radius: 10px;
-              overflow: hidden;
-              box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-              padding: 40px 30px;
-              text-align: center;
-            }
-            .header h1 {
-              margin: 0;
-              font-size: 28px;
-              font-weight: 700;
-            }
-            .content {
-              padding: 40px 30px;
-            }
-            .content h2 {
-              color: #333;
-              font-size: 22px;
-              margin-top: 0;
-            }
-            .content p {
-              color: #555;
-              font-size: 16px;
-              margin: 15px 0;
-            }
-            .button {
-              display: inline-block;
-              padding: 15px 40px;
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white !important;
-              text-decoration: none;
-              border-radius: 8px;
-              font-weight: 600;
-              font-size: 16px;
-              margin: 25px 0;
-              transition: transform 0.2s;
-            }
-            .button:hover {
-              transform: translateY(-2px);
-            }
-            .link-text {
-              word-break: break-all;
-              color: #667eea;
-              font-size: 14px;
-              background: #f0f0f0;
-              padding: 12px;
-              border-radius: 6px;
-              margin: 15px 0;
-            }
-            .warning {
-              background: #fff3cd;
-              border-left: 4px solid #ffc107;
-              padding: 15px;
-              margin: 20px 0;
-              border-radius: 4px;
-            }
-            .warning-title {
-              font-weight: 700;
-              color: #856404;
-              margin: 0 0 10px 0;
-            }
-            .warning ul {
-              margin: 10px 0;
-              padding-left: 20px;
-              color: #856404;
-            }
-            .warning li {
-              margin: 5px 0;
-            }
-            .footer {
-              text-align: center;
-              padding: 20px 30px;
-              background: #f9f9f9;
-              color: #666;
-              font-size: 14px;
-            }
-            .footer p {
-              margin: 5px 0;
-            }
-            @media only screen and (max-width: 600px) {
-              .container {
-                margin: 10px;
-              }
-              .header, .content, .footer {
-                padding: 20px 15px;
-              }
-              .button {
-                display: block;
-                width: 100%;
-                text-align: center;
-              }
-            }
+            ${getEmailStyles()}
           </style>
         </head>
         <body>
@@ -409,7 +328,7 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
                 <a href="${resetUrl}" class="button">Reset Password</a>
               </center>
               
-              <p style="color: #666; font-size: 14px; margin-top: 25px;">If the button doesn't work, copy and paste this link into your browser:</p>
+              <p style="color: #6B7280; font-size: 14px; margin-top: 25px;">If the button doesn't work, copy and paste this link into your browser:</p>
               <div class="link-text">${resetUrl}</div>
               
               <div class="warning">
@@ -422,14 +341,14 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
                 </ul>
               </div>
               
-              <p style="margin-top: 25px; color: #555;">After resetting your password, you'll be able to sign in with your new credentials.</p>
+              <p style="margin-top: 25px; color: #4B5563;">After resetting your password, you'll be able to sign in with your new credentials.</p>
               
-              <p style="color: #999; font-size: 14px; margin-top: 25px;">If you're having trouble, please contact our support team for assistance.</p>
+              <p style="color: #9CA3AF; font-size: 14px; margin-top: 25px;">If you're having trouble, please contact our support team for assistance.</p>
             </div>
             <div class="footer">
-              <p><strong>TeenShapers</strong></p>
+              <p><strong style="color: #FF6B35;">TeenShapers</strong></p>
               <p>Shaping the future, one teen at a time</p>
-              <p style="margin-top: 15px; color: #999;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
+              <p style="margin-top: 15px; color: #9CA3AF;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -463,12 +382,6 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
   }
 };
 
-/**
- * Send welcome email after successful verification
- * @param {string} email - Recipient email address
- * @param {string} name - User's name for personalization
- * @returns {Promise<void>}
- */
 export const sendWelcomeEmail = async (email, name) => {
   const transporter = createTransporter();
 
@@ -483,107 +396,19 @@ export const sendWelcomeEmail = async (email, name) => {
           <meta charset="UTF-8">
           <meta name="viewport" content="width=device-width, initial-scale=1.0">
           <style>
-            body {
-              font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-              line-height: 1.6;
-              color: #333;
-              margin: 0;
-              padding: 0;
-              background-color: #f4f4f4;
-            }
-            .container {
-              max-width: 600px;
-              margin: 20px auto;
-              background: #ffffff;
-              border-radius: 10px;
-              overflow: hidden;
-              box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            }
-            .header {
-              background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-              color: white;
-              padding: 40px 30px;
-              text-align: center;
-            }
-            .header h1 {
-              margin: 0;
-              font-size: 32px;
-              font-weight: 700;
-            }
-            .content {
-              padding: 40px 30px;
-            }
-            .content h2 {
-              color: #333;
-              font-size: 24px;
-              margin-top: 0;
-            }
-            .content p {
-              color: #555;
-              font-size: 16px;
-              margin: 15px 0;
-            }
-            .feature {
-              background: white;
-              padding: 20px;
-              margin: 15px 0;
-              border-radius: 8px;
-              border-left: 4px solid #667eea;
-              box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-            }
-            .feature-title {
-              color: #667eea;
-              font-weight: 700;
-              font-size: 18px;
-              margin: 0 0 8px 0;
-            }
-            .feature p {
-              margin: 0;
-              color: #666;
-              font-size: 15px;
-            }
-            .stats {
-              background: #f8f9fa;
-              padding: 20px;
-              border-radius: 8px;
-              margin: 20px 0;
-              text-align: center;
-            }
-            .stats p {
-              margin: 5px 0;
-              color: #666;
-              font-size: 14px;
-            }
-            .footer {
-              text-align: center;
-              padding: 20px 30px;
-              background: #f9f9f9;
-              color: #666;
-              font-size: 14px;
-            }
-            .footer p {
-              margin: 5px 0;
-            }
-            @media only screen and (max-width: 600px) {
-              .container {
-                margin: 10px;
-              }
-              .header, .content, .footer {
-                padding: 20px 15px;
-              }
-            }
+            ${getEmailStyles()}
           </style>
         </head>
         <body>
           <div class="container">
             <div class="header">
-              <h1>You're All Set! </h1>
+              <h1>You're All Set! 🚀</h1>
             </div>
             <div class="content">
               <h2>Welcome aboard, ${name}!</h2>
               <p>Your email has been verified and your account is now fully active. You're ready to start your journey with TeenShapers!</p>
               
-              <p style="font-size: 18px; font-weight: 600; color: #667eea; margin: 30px 0 20px 0;">What's Next?</p>
+              <p style="font-size: 18px; font-weight: 700; color: #FF6B35; margin: 30px 0 20px 0; font-family: 'Trebuchet MS', 'Lucida Grande', sans-serif;">What's Next?</p>
               
               <div class="feature">
                 <div class="feature-title">📱 Complete Your Profile</div>
@@ -591,7 +416,7 @@ export const sendWelcomeEmail = async (email, name) => {
               </div>
               
               <div class="feature">
-                <div class="feature-title">Join Your First Challenge</div>
+                <div class="feature-title">🎯 Join Your First Challenge</div>
                 <p>Check out the current monthly challenge and start earning badges! Each challenge is designed to help you grow and learn.</p>
               </div>
               
@@ -612,14 +437,14 @@ export const sendWelcomeEmail = async (email, name) => {
               
               <p style="margin-top: 30px;">If you have any questions or need help getting started, our support team is always here for you.</p>
               
-              <p style="font-weight: 600; color: #667eea; margin-top: 25px;">Happy shaping! </p>
+              <p style="font-weight: 700; color: #FF6B35; margin-top: 25px;">Happy shaping! 🎉</p>
               
-              <p style="color: #999; font-size: 14px; margin-top: 30px;">P.S. Make sure to enable notifications so you never miss important updates about new challenges and achievements!</p>
+              <p style="color: #9CA3AF; font-size: 14px; margin-top: 30px;">P.S. Make sure to enable notifications so you never miss important updates about new challenges and achievements!</p>
             </div>
             <div class="footer">
-              <p><strong>TeenShapers</strong></p>
+              <p><strong style="color: #FF6B35;">TeenShapers</strong></p>
               <p>Shaping the future, one teen at a time</p>
-              <p style="margin-top: 15px; color: #999;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
+              <p style="margin-top: 15px; color: #9CA3AF;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
             </div>
           </div>
         </body>
@@ -635,13 +460,13 @@ export const sendWelcomeEmail = async (email, name) => {
       
       What's Next?
       
-      Complete Your Profile
+      📱 Complete Your Profile
       Add a profile photo and customize your settings.
       
-      Join Your First Challenge
+      🎯 Join Your First Challenge
       Check out the current monthly challenge and start earning badges!
       
-    Track Your Progress
+      🏆 Track Your Progress
       Monitor your achievements and see how you rank on the leaderboard.
       
       👥 Join the Community
@@ -649,7 +474,7 @@ export const sendWelcomeEmail = async (email, name) => {
       
       If you have any questions, our support team is always here for you.
       
-      Happy shaping! 
+      Happy shaping! 🎉
       
       © ${new Date().getFullYear()} TeenShapers. All rights reserved.
     `,
@@ -664,11 +489,6 @@ export const sendWelcomeEmail = async (email, name) => {
   }
 };
 
-/**
- * Send a test email to verify configuration
- * @param {string} email - Test email recipient
- * @returns {Promise<boolean>} True if successful
- */
 export const sendTestEmail = async (email) => {
   const transporter = createTransporter();
 
@@ -677,15 +497,43 @@ export const sendTestEmail = async (email) => {
     to: email,
     subject: 'TeenShapers Email Configuration Test ✅',
     html: `
-      <h2>Email Configuration Successful!</h2>
-      <p>If you're seeing this email, your TeenShapers email service is configured correctly.</p>
-      <p><strong>Configuration Details:</strong></p>
-      <ul>
-        <li>Service: ${process.env.EMAIL_SERVICE || 'gmail'}</li>
-        <li>From: ${process.env.EMAIL_USER}</li>
-        <li>Time: ${new Date().toISOString()}</li>
-      </ul>
-      <p>You're all set to send verification and password reset emails!</p>
+      <!DOCTYPE html>
+      <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <style>
+            ${getEmailStyles()}
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <div class="header">
+              <h1>Email Configuration Test ✅</h1>
+            </div>
+            <div class="content">
+              <h2>Configuration Successful!</h2>
+              <p>If you're seeing this email, your TeenShapers email service is configured correctly.</p>
+              
+              <div class="feature">
+                <div class="feature-title">📧 Configuration Details</div>
+                <p><strong>Service:</strong> ${
+                  process.env.EMAIL_SERVICE || 'gmail'
+                }</p>
+                <p><strong>From:</strong> ${process.env.EMAIL_USER}</p>
+                <p><strong>Time:</strong> ${new Date().toISOString()}</p>
+              </div>
+              
+              <p style="font-weight: 700; color: #10B981; margin-top: 25px;">✅ You're all set to send verification and password reset emails!</p>
+            </div>
+            <div class="footer">
+              <p><strong style="color: #FF6B35;">TeenShapers</strong></p>
+              <p>Shaping the future, one teen at a time</p>
+              <p style="margin-top: 15px; color: #9CA3AF;">© ${new Date().getFullYear()} TeenShapers. All rights reserved.</p>
+            </div>
+          </div>
+        </body>
+      </html>
     `,
     text: `
       Email Configuration Successful!
