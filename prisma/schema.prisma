@@ -60,27 +60,31 @@ model User {
 }
 
 model Teen {
-  id            String         @id @default(auto()) @map("_id") @db.ObjectId
-  email         String         @unique
-  password      String
-  name          String
-  age           Int
-  gender        String?
-  state         String?
-  country       String?
-  profilePhoto  String?
-  parentEmail   String?
-  isActive      Boolean        @default(true)
-  optInPublic   Boolean        @default(false)
-  createdAt     DateTime       @default(now())
-  updatedAt     DateTime       @updatedAt
+  id                   String         @id @default(auto()) @map("_id") @db.ObjectId
+  email                String         @unique
+  password             String
+  name                 String
+  age                  Int
+  gender               String?
+  state                String?
+  country              String?
+  profilePhoto         String?
+  parentEmail          String?
+  isEmailVerified      Boolean        @default(false)
+  verificationToken    String?
+  passwordResetToken   String?
+  passwordResetExpires DateTime?
+  isActive             Boolean        @default(true)
+  optInPublic          Boolean        @default(false)
+  createdAt            DateTime       @default(now())
+  updatedAt            DateTime       @updatedAt
   // Relations
-  submissions   Submission[]
-  badges        TeenBadge[]
-  progress      TeenProgress[]
-  raffleEntries RaffleEntry[]
-  pushToken     PushToken?
-  notifications Notification[]
+  submissions          Submission[]
+  badges               TeenBadge[]
+  progress             TeenProgress[]
+  raffleEntries        RaffleEntry[]
+  pushToken            PushToken?
+  notifications        Notification[]
 
   @@map("teens")
 }
