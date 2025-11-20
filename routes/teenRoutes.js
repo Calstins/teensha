@@ -45,6 +45,8 @@ const router = express.Router();
 // TEEN PROFILE ROUTES
 // ============================================
 router.get('/profile', authenticateTeen, getProfile);
+
+// Support both PUT and PATCH for profile updates
 router.put(
   '/profile',
   authenticateTeen,
@@ -56,6 +58,34 @@ router.put(
   handleValidationErrors,
   updateProfile
 );
+
+router.patch(
+  '/profile',
+  authenticateTeen,
+  [
+    body('name').optional().isString().isLength({ min: 1 }),
+    body('email').optional().isEmail(),
+    body('age').optional().isInt({ min: 13 }),
+    body('profilePhoto').optional().isString(),
+  ],
+  handleValidationErrors,
+  updateProfile
+);
+
+// Add route that accepts :teenId parameter (for backward compatibility)
+router.patch(
+  '/:teenId',
+  authenticateTeen,
+  [
+    param('teenId').isString(),
+    body('profilePhoto').optional().isString(),
+    body('name').optional().isString(),
+    body('age').optional().isInt({ min: 13 }),
+  ],
+  handleValidationErrors,
+  updateProfile
+);
+
 router.get('/dashboard', authenticateTeen, getDashboard);
 
 // ============================================
@@ -74,7 +104,7 @@ router.get(
 );
 
 // ============================================
-// COMMUNITY ROUTES (NEW)
+// COMMUNITY ROUTES
 // ============================================
 router.get('/community/activity', authenticateTeen, getRecentActivity);
 router.get('/community/top-performers', authenticateTeen, getTopPerformers);
