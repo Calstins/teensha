@@ -15,6 +15,7 @@ import progressRoutes from './routes/progessRoutes.js';
 import raffleRoutes from './routes/raffleRoutes.js';
 import teenRoutes from './routes/teenRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
+import transactionRoutes from './routes/transactionRoutes.js';
 
 dotenv.config();
 
@@ -56,6 +57,7 @@ app.use('/api/teen', teenRoutes);
 app.use('/api/badges', badgeRoutes);
 app.use('/api/progress', progressRoutes);
 app.use('/api/raffle', raffleRoutes);
+app.use('/api/admin/transactions', transactionRoutes);
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -75,16 +77,16 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/api/debug', (req, res) => {
-  res.json({
-    timestamp: new Date().toISOString(),
-    env: process.env.NODE_ENV,
-    hasDB: !!process.env.DATABASE_URL,
-    hasJWT: !!process.env.JWT_SECRET,
-    hasPaystack: !!process.env.PAYSTACK_SECRET_KEY,
-    deployment: process.env.VERCEL ? 'Vercel' : 'Local',
-  });
-});
+// app.get('/api/debug', (req, res) => {
+//   res.json({
+//     timestamp: new Date().toISOString(),
+//     env: process.env.NODE_ENV,
+//     hasDB: !!process.env.DATABASE_URL,
+//     hasJWT: !!process.env.JWT_SECRET,
+//     hasPaystack: !!process.env.PAYSTACK_SECRET_KEY,
+//     deployment: process.env.VERCEL ? 'Vercel' : 'Local',
+//   });
+// });
 
 // Health check
 app.get('/health', async (req, res) => {
