@@ -1,8 +1,11 @@
-// controllers/badgeController.js
+// controllers/badgeController.js - UPDATED WITH PAYSTACK
 import { validationResult } from 'express-validator';
 import { updateRaffleEligibilityHelper } from '../utils/helpers.js';
 import { handleValidationErrors } from '../middleware/validation.js';
 import prisma from '../lib/prisma.js';
+import Paystack from 'paystack-api';
+
+const paystack = Paystack(process.env.PAYSTACK_SECRET_KEY);
 
 // ============================================
 // ADMIN BADGE MANAGEMENT
@@ -269,10 +272,10 @@ export const deleteBadge = async (req, res) => {
 };
 
 // ============================================
-// TEEN BADGE OPERATIONS
+// TEEN BADGE OPERATIONS WITH PAYSTACK
 // ============================================
 
-export const purchaseBadge = async (req, res) => {
+export const initializeBadgePurchase = async (req, res) => {
   try {
     handleValidationErrors(req, res, () => {});
 
@@ -289,6 +292,7 @@ export const purchaseBadge = async (req, res) => {
             goLiveDate: true,
             closingDate: true,
             year: true,
+            theme: true,
           },
         },
       },
@@ -301,14 +305,8 @@ export const purchaseBadge = async (req, res) => {
       });
     }
 
-    // Check if challenge is active
-    const currentDate = new Date();
-    if (
-      !badge.challenge.isPublished ||
-      !badge.challenge.isActive ||
-      badge.challenge.goLiveDate > currentDate ||
-      badge.challenge.closingDate < currentDate
-    ) {
+    // Check if challenge is active (allow past challenges)
+    if (!badge.challenge.isPublished) {
       return res.status(403).json({
         success: false,
         message: 'Badge is not available for purchase',
@@ -332,8 +330,37 @@ export const purchaseBadge = async (req, res) => {
       });
     }
 
-    // Create or update teen badge record
-    const teenBadge = await prisma.teenBadge.upsert({
+    // Get teen details
+    const teen = await prisma.teen.findUnique({
+      where: { id: req.teen.id },
+      select: { email: true, name: true },
+    });
+
+    // Initialize Paystack transaction
+    const paystackData = {
+      amount: Math.round(badge.price * 100), // Convert to kobo
+      email: teen.email,
+      metadata: {
+        badgeId: badge.id,
+        challengeId: badge.challengeId,
+        teenId: req.teen.id,
+        badgeName: badge.name,
+        challengeTheme: badge.challenge.theme,
+      },
+      callback_url: `${process.env.APP_URL}/payment/callback`,
+    };
+
+    const transaction = await paystack.transaction.initialize(paystackData);
+
+    if (!transaction.status) {
+      return res.status(500).json({
+        success: false,
+        message: 'Failed to initialize payment',
+      });
+    }
+
+    // Create pending teen badge record
+    await prisma.teenBadge.upsert({
       where: {
         teenId_badgeId: {
           teenId: req.teen.id,
@@ -341,12 +368,91 @@ export const purchaseBadge = async (req, res) => {
         },
       },
       update: {
-        status: 'PURCHASED',
-        purchasedAt: new Date(),
+        status: 'AVAILABLE',
       },
       create: {
         teenId: req.teen.id,
         badgeId: badge.id,
+        status: 'AVAILABLE',
+      },
+    });
+
+    res.json({
+      success: true,
+      message: 'Payment initialized successfully',
+      data: {
+        authorization_url: transaction.data.authorization_url,
+        access_code: transaction.data.access_code,
+        reference: transaction.data.reference,
+        badge: {
+          id: badge.id,
+          name: badge.name,
+          description: badge.description,
+          price: badge.price,
+        },
+      },
+    });
+  } catch (error) {
+    console.error('Initialize badge purchase error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
+export const verifyBadgePurchase = async (req, res) => {
+  try {
+    const { reference } = req.params;
+
+    // Verify transaction with Paystack
+    const verification = await paystack.transaction.verify(reference);
+
+    if (!verification.status || verification.data.status !== 'success') {
+      return res.status(400).json({
+        success: false,
+        message: 'Payment verification failed',
+      });
+    }
+
+    const { metadata } = verification.data;
+    const { badgeId, challengeId, teenId } = metadata;
+
+    // Get badge details
+    const badge = await prisma.badge.findUnique({
+      where: { id: badgeId },
+      include: {
+        challenge: {
+          select: {
+            year: true,
+          },
+        },
+      },
+    });
+
+    if (!badge) {
+      return res.status(404).json({
+        success: false,
+        message: 'Badge not found',
+      });
+    }
+
+    // Update teen badge record to PURCHASED
+    const teenBadge = await prisma.teenBadge.upsert({
+      where: {
+        teenId_badgeId: {
+          teenId,
+          badgeId,
+        },
+      },
+      update: {
+        status: 'PURCHASED',
+        purchasedAt: new Date(),
+      },
+      create: {
+        teenId,
+        badgeId,
         status: 'PURCHASED',
         purchasedAt: new Date(),
       },
@@ -356,8 +462,8 @@ export const purchaseBadge = async (req, res) => {
     const progress = await prisma.teenProgress.findUnique({
       where: {
         teenId_challengeId: {
-          teenId: req.teen.id,
-          challengeId: badge.challengeId,
+          teenId,
+          challengeId,
         },
       },
     });
@@ -372,8 +478,8 @@ export const purchaseBadge = async (req, res) => {
       });
     }
 
-    // Update raffle eligibility using helper
-    await updateRaffleEligibilityHelper(req.teen.id, badge.challenge.year);
+    // Update raffle eligibility
+    await updateRaffleEligibilityHelper(teenId, badge.challenge.year);
 
     res.json({
       success: true,
@@ -388,13 +494,15 @@ export const purchaseBadge = async (req, res) => {
         },
         status: progress?.percentage === 100 ? 'EARNED' : 'PURCHASED',
         purchasedAt: new Date(),
+        paymentReference: reference,
       },
     });
   } catch (error) {
-    console.error('Purchase badge error:', error);
+    console.error('Verify badge purchase error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };

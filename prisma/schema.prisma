@@ -41,6 +41,13 @@ enum BadgeStatus {
   EARNED
 }
 
+enum TransactionStatus {
+  PENDING
+  SUCCESS
+  FAILED
+  CANCELLED
+}
+
 model User {
   id        String   @id @default(auto()) @map("_id") @db.ObjectId
   email     String   @unique
@@ -85,6 +92,7 @@ model Teen {
   raffleEntries        RaffleEntry[]
   pushToken            PushToken?
   notifications        Notification[]
+  transactions         Transaction[]
 
   @@map("teens")
 }
@@ -170,10 +178,33 @@ model Badge {
   updatedAt   DateTime @updatedAt
 
   // Relations
-  challenge  MonthlyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
-  teenBadges TeenBadge[]
+  challenge    MonthlyChallenge @relation(fields: [challengeId], references: [id], onDelete: Cascade)
+  teenBadges   TeenBadge[]
+  transactions Transaction[]
 
   @@map("badges")
+}
+
+model Transaction {
+  id            String            @id @default(auto()) @map("_id") @db.ObjectId
+  reference     String            @unique // Paystack reference
+  teenId        String            @db.ObjectId
+  badgeId       String            @db.ObjectId
+  amount        Float // Amount in Naira
+  currency      String            @default("NGN")
+  status        TransactionStatus @default(PENDING)
+  paymentMethod String? // card, bank_transfer, etc.
+  customerEmail String?
+  metadata      Json?
+  paidAt        DateTime?
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+
+  // Relations
+  teen  Teen  @relation(fields: [teenId], references: [id], onDelete: Cascade)
+  badge Badge @relation(fields: [badgeId], references: [id])
+
+  @@map("transactions")
 }
 
 model TeenBadge {

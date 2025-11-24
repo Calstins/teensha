@@ -1,4 +1,4 @@
-// controllers/submissionController.js
+// controllers/submissionController.js - UPDATED WITH MONTH/YEAR FILTERING
 import { validationResult } from 'express-validator';
 import {
   updateTeenProgressHelper,
@@ -288,27 +288,65 @@ export const getMySubmissions = async (req, res) => {
 // ADMIN/STAFF ENDPOINTS
 // ============================================
 
+// ✅ UPDATED: Added month, year, and challengeId filters
 export const getReviewQueue = async (req, res) => {
   try {
     const {
-      status = 'PENDING',
+      status,
       challengeId,
       taskType,
+      month,
+      year,
       page = 1,
-      limit = 20,
+      limit = 100, // Increased limit for client-side filtering
     } = req.query;
+
+    console.log('📊 Review queue filters:', {
+      status,
+      challengeId,
+      taskType,
+      month,
+      year,
+      page,
+      limit,
+    });
 
     const where = {};
 
+    // Status filter
     if (status) {
       where.status = status;
     }
 
-    if (challengeId || taskType) {
+    // Build task filter
+    if (challengeId || taskType || month || year) {
       where.task = {};
-      if (challengeId) where.task.challengeId = challengeId;
-      if (taskType) where.task.taskType = taskType;
+
+      // Challenge ID filter (specific challenge)
+      if (challengeId) {
+        where.task.challengeId = challengeId;
+      }
+
+      // Task type filter
+      if (taskType) {
+        where.task.taskType = taskType;
+      }
+
+      // Month/Year filters (filter on challenge)
+      if (month || year) {
+        where.task.challenge = {};
+
+        if (month) {
+          where.task.challenge.month = parseInt(month);
+        }
+
+        if (year) {
+          where.task.challenge.year = parseInt(year);
+        }
+      }
     }
+
+    console.log('📋 Prisma where clause:', JSON.stringify(where, null, 2));
 
     const skip = (parseInt(page) - 1) * parseInt(limit);
 
@@ -350,13 +388,15 @@ export const getReviewQueue = async (req, res) => {
           },
         },
         orderBy: {
-          submittedAt: 'asc',
+          submittedAt: 'desc', // Changed to desc for newest first
         },
         skip,
         take: parseInt(limit),
       }),
       prisma.submission.count({ where }),
     ]);
+
+    console.log(`✅ Found ${submissions.length} submissions (total: ${total})`);
 
     res.json({
       success: true,
@@ -371,10 +411,11 @@ export const getReviewQueue = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Get review queue error:', error);
+    console.error('❌ Get review queue error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
+      error: error.message,
     });
   }
 };

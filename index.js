@@ -1,4 +1,4 @@
-// index.js
+// index.js - UPDATED WITH WEBHOOK ROUTES
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -14,6 +14,7 @@ import badgeRoutes from './routes/badgeRoutes.js';
 import progressRoutes from './routes/progessRoutes.js';
 import raffleRoutes from './routes/raffleRoutes.js';
 import teenRoutes from './routes/teenRoutes.js';
+import webhookRoutes from './routes/webhookRoutes.js';
 
 dotenv.config();
 
@@ -28,6 +29,7 @@ app.use(
   cors({
     origin: [
       'https://teenshapersadmin.vercel.app',
+      'https://teenshaper.vercel.app',
       'http://localhost:3000',
       'http://localhost:3001',
     ],
@@ -35,6 +37,15 @@ app.use(
   })
 );
 app.use(morgan('combined'));
+
+// ✅ IMPORTANT: Webhook route MUST come before express.json()
+// Paystack needs raw body for signature verification
+app.use(
+  '/api/webhooks',
+  express.raw({ type: 'application/json' }),
+  webhookRoutes
+);
+
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -59,6 +70,7 @@ app.get('/', (req, res) => {
       badges: '/api/badges',
       progress: '/api/progress',
       raffle: '/api/raffle',
+      webhooks: '/api/webhooks',
     },
   });
 });
@@ -69,6 +81,7 @@ app.get('/api/debug', (req, res) => {
     env: process.env.NODE_ENV,
     hasDB: !!process.env.DATABASE_URL,
     hasJWT: !!process.env.JWT_SECRET,
+    hasPaystack: !!process.env.PAYSTACK_SECRET_KEY,
     deployment: process.env.VERCEL ? 'Vercel' : 'Local',
   });
 });
@@ -82,6 +95,9 @@ app.get('/health', async (req, res) => {
       timestamp: new Date().toISOString(),
       environment: process.env.NODE_ENV || 'development',
       database: 'Connected',
+      paystack: process.env.PAYSTACK_SECRET_KEY
+        ? 'Configured'
+        : 'Not Configured',
     });
   } catch (error) {
     res.status(503).json({
@@ -117,6 +133,7 @@ if (process.env.NODE_ENV !== 'production') {
     console.log(`   Auth: http://localhost:${PORT}/api/auth`);
     console.log(`   Admin: http://localhost:${PORT}/api/admin`);
     console.log(`   Teen: http://localhost:${PORT}/api/teen`);
+    console.log(`   Webhooks: http://localhost:${PORT}/api/webhooks`);
   });
 
   const gracefulShutdown = async (signal) => {

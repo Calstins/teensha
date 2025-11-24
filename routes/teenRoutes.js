@@ -1,4 +1,4 @@
-// routes/teenRoutes.js
+// routes/teenRoutes.js - UPDATED WITH PAYSTACK
 import express from 'express';
 import { body, param } from 'express-validator';
 import { authenticateTeen } from '../middleware/auth.js';
@@ -32,7 +32,12 @@ import {
   getMySubmissions,
 } from '../controllers/submissionController.js';
 
-import { purchaseBadge, getMyBadges } from '../controllers/badgeController.js';
+import {
+  initializeBadgePurchase,
+  verifyBadgePurchase,
+  getMyBadges,
+} from '../controllers/badgeController.js';
+
 import {
   getProfile,
   updateProfile,
@@ -46,7 +51,6 @@ const router = express.Router();
 // ============================================
 router.get('/profile', authenticateTeen, getProfile);
 
-// Support both PUT and PATCH for profile updates
 router.put(
   '/profile',
   authenticateTeen,
@@ -72,7 +76,6 @@ router.patch(
   updateProfile
 );
 
-// Add route that accepts :teenId parameter (for backward compatibility)
 router.patch(
   '/:teenId',
   authenticateTeen,
@@ -152,14 +155,22 @@ router.patch(
 );
 
 // ============================================
-// BADGE ROUTES (TEEN-FACING)
+// BADGE ROUTES (TEEN-FACING) - UPDATED WITH PAYSTACK
 // ============================================
 router.post(
-  '/badges/purchase',
+  '/badges/purchase/initialize',
   authenticateTeen,
   [body('badgeId').isMongoId()],
   handleValidationErrors,
-  purchaseBadge
+  initializeBadgePurchase
+);
+
+router.get(
+  '/badges/purchase/verify/:reference',
+  authenticateTeen,
+  [param('reference').isString()],
+  handleValidationErrors,
+  verifyBadgePurchase
 );
 
 router.get('/badges/my-badges', authenticateTeen, getMyBadges);
