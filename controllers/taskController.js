@@ -298,7 +298,7 @@ export const getTaskDetails = async (req, res) => {
       });
     }
 
-    // ✅ FIX: Only check if challenge is published
+    // ✅ UPDATED: Only check if challenge is published
     // Allow viewing tasks from past challenges
     if (!task.challenge.isPublished) {
       return res.status(403).json({
@@ -307,8 +307,9 @@ export const getTaskDetails = async (req, res) => {
       });
     }
 
-    // Check if challenge is currently open for NEW submissions
+    // ✅ NEW: Check if challenge/task is past closing date
     const currentDate = new Date();
+    const isPastChallenge = task.challenge.closingDate < currentDate;
     const isChallengeOpen =
       task.challenge.isActive &&
       task.challenge.goLiveDate <= currentDate &&
@@ -339,8 +340,10 @@ export const getTaskDetails = async (req, res) => {
         challenge: {
           id: task.challenge.id,
           theme: task.challenge.theme,
-          isOpen: isChallengeOpen, // ✅ Tell frontend if submissions are allowed
+          isChallengeOpen, // Whether submissions are within normal timeframe
+          isPastChallenge, // ✅ NEW: Whether challenge has closed
           closingDate: task.challenge.closingDate,
+          allowLateSubmission: true, // ✅ NEW: Always allow submissions
         },
         submission: submission
           ? {
@@ -349,6 +352,9 @@ export const getTaskDetails = async (req, res) => {
               fileUrls: submission.fileUrls,
               status: submission.status,
               submittedAt: submission.submittedAt,
+              // ✅ NEW: Indicate if submission was late
+              submittedLate:
+                submission.submittedAt > task.challenge.closingDate,
             }
           : null,
       },
