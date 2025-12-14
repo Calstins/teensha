@@ -1,4 +1,4 @@
-// index.js - UPDATED WITH WEBHOOK ROUTES
+// index.js - FIXED VERSION WITH UPLOAD ROUTES
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
@@ -16,6 +16,7 @@ import raffleRoutes from './routes/raffleRoutes.js';
 import teenRoutes from './routes/teenRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
 import transactionRoutes from './routes/transactionRoutes.js';
+import uploadRoutes from './routes/uploadRoutes.js'; // ✅ ADD THIS
 
 dotenv.config();
 
@@ -58,6 +59,7 @@ app.use('/api/badges', badgeRoutes);
 app.use('/api/progress', progressRoutes);
 app.use('/api/raffle', raffleRoutes);
 app.use('/api/admin/transactions', transactionRoutes);
+app.use('/api/upload', uploadRoutes); // ✅ ADD THIS ROUTE
 
 // Root endpoint
 app.get('/', (req, res) => {
@@ -73,20 +75,10 @@ app.get('/', (req, res) => {
       progress: '/api/progress',
       raffle: '/api/raffle',
       webhooks: '/api/webhooks',
+      upload: '/api/upload', // ✅ ADD THIS
     },
   });
 });
-
-// app.get('/api/debug', (req, res) => {
-//   res.json({
-//     timestamp: new Date().toISOString(),
-//     env: process.env.NODE_ENV,
-//     hasDB: !!process.env.DATABASE_URL,
-//     hasJWT: !!process.env.JWT_SECRET,
-//     hasPaystack: !!process.env.PAYSTACK_SECRET_KEY,
-//     deployment: process.env.VERCEL ? 'Vercel' : 'Local',
-//   });
-// });
 
 // Health check
 app.get('/health', async (req, res) => {
@@ -135,6 +127,7 @@ if (process.env.NODE_ENV !== 'production') {
     console.log(`   Auth: http://localhost:${PORT}/api/auth`);
     console.log(`   Admin: http://localhost:${PORT}/api/admin`);
     console.log(`   Teen: http://localhost:${PORT}/api/teen`);
+    console.log(`   Upload: http://localhost:${PORT}/api/upload`);
     console.log(`   Webhooks: http://localhost:${PORT}/api/webhooks`);
   });
 

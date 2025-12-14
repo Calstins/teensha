@@ -1,4 +1,4 @@
-// controllers/submissionController.js - UPDATED WITH MONTH/YEAR FILTERING
+// controllers/submissionController.js - FIXED VERSION
 import { validationResult } from 'express-validator';
 import {
   updateTeenProgressHelper,
@@ -27,6 +27,14 @@ export const submitTaskResponse = async (req, res) => {
     const teenId = req.teen.id;
     const files = req.files || [];
 
+    console.log('📝 Raw submission data:', {
+      taskId,
+      contentType: typeof content,
+      contentPreview:
+        typeof content === 'string' ? content.substring(0, 100) : content,
+      filesCount: files.length,
+    });
+
     // Get task details
     const task = await prisma.task.findUnique({
       where: { id: taskId },
@@ -42,17 +50,12 @@ export const submitTaskResponse = async (req, res) => {
       });
     }
 
-    // Check if challenge is active
-    const currentDate = new Date();
-    if (
-      !task.challenge.isPublished ||
-      !task.challenge.isActive ||
-      task.challenge.goLiveDate > currentDate ||
-      task.challenge.closingDate < currentDate
-    ) {
+    // ✅ REMOVED: Strict date validation - allow submissions anytime
+    // Check only if challenge is published
+    if (!task.challenge.isPublished) {
       return res.status(403).json({
         success: false,
-        message: 'Challenge is not currently active',
+        message: 'Challenge is not available',
       });
     }
 
@@ -66,6 +69,21 @@ export const submitTaskResponse = async (req, res) => {
       },
     });
 
+    // ✅ CRITICAL FIX: Parse content if it's a JSON string
+    let parsedContent;
+    try {
+      parsedContent =
+        typeof content === 'string' ? JSON.parse(content) : content;
+      console.log('✅ Parsed content:', parsedContent);
+    } catch (parseError) {
+      console.error('❌ Content parsing error:', parseError);
+      return res.status(400).json({
+        success: false,
+        message: 'Invalid content format',
+        error: parseError.message,
+      });
+    }
+
     // Validate and process submission based on task type
     let processedContent;
     let fileUrls = [];
@@ -73,8 +91,8 @@ export const submitTaskResponse = async (req, res) => {
 
     switch (task.taskType) {
       case 'TEXT':
-        validationError = validateTextSubmission(content);
-        processedContent = { text: content };
+        validationError = validateTextSubmission(parsedContent);
+        processedContent = { text: parsedContent };
         break;
 
       case 'IMAGE':
@@ -91,57 +109,91 @@ export const submitTaskResponse = async (req, res) => {
             fileUrls.push(url);
           }
           processedContent = {
-            description: content || '',
+            description: parsedContent || '',
             imageCount: fileUrls.length,
           };
         }
         break;
 
       case 'VIDEO':
-        validationError = validateVideoSubmission(content);
+        validationError = validateVideoSubmission(parsedContent);
         processedContent = {
-          videoUrl: content,
-          platform: detectVideoPlatform(content),
+          videoUrl: parsedContent,
+          platform: detectVideoPlatform(parsedContent),
         };
         break;
 
       case 'QUIZ':
-        validationError = validateQuizSubmission(content, task.options);
+        console.log('🎯 QUIZ validation:', {
+          parsedContent,
+          taskOptions: task.options,
+        });
+        validationError = validateQuizSubmission(parsedContent, task.options);
         if (!validationError) {
+          // parsedContent is already an object with answers
           processedContent = {
-            answers: JSON.parse(content),
+            answers: parsedContent.answers || parsedContent,
             submittedAt: new Date().toISOString(),
           };
         }
         break;
 
       case 'FORM':
-        validationError = validateFormSubmission(content, task.options);
+        console.log('📋 FORM validation:', {
+          parsedContent,
+          taskOptions: task.options,
+        });
+        validationError = validateFormSubmission(parsedContent, task.options);
         if (!validationError) {
+          // parsedContent is already an object with responses
           processedContent = {
-            responses: JSON.parse(content),
+            responses: parsedContent.responses || parsedContent,
             submittedAt: new Date().toISOString(),
           };
         }
         break;
 
       case 'PICK_ONE':
-        validationError = validatePickOneSubmission(content, task.options);
+        console.log('☝️ PICK_ONE validation:', {
+          parsedContent,
+          taskOptions: task.options,
+        });
+        validationError = validatePickOneSubmission(
+          parsedContent,
+          task.options
+        );
         if (!validationError) {
+          // parsedContent is already an object with selectedOption
           processedContent = {
-            selectedOption: content,
+            selectedOption: parsedContent.selectedOption || parsedContent,
             submittedAt: new Date().toISOString(),
           };
         }
         break;
 
       case 'CHECKLIST':
-        validationError = validateChecklistSubmission(content, task.options);
+        console.log('✅ CHECKLIST validation:', {
+          parsedContent,
+          taskOptions: task.options,
+          checkedItems: parsedContent.checkedItems,
+          isArray: Array.isArray(parsedContent.checkedItems),
+        });
+
+        // ✅ CRITICAL FIX: Validate the already-parsed content object
+        validationError = validateChecklistSubmission(
+          parsedContent,
+          task.options
+        );
+
         if (!validationError) {
+          // parsedContent is already an object with checkedItems array
           processedContent = {
-            checkedItems: JSON.parse(content),
+            checkedItems: parsedContent.checkedItems,
             submittedAt: new Date().toISOString(),
           };
+          console.log('✅ CHECKLIST processed:', processedContent);
+        } else {
+          console.error('❌ CHECKLIST validation failed:', validationError);
         }
         break;
 
@@ -150,11 +202,14 @@ export const submitTaskResponse = async (req, res) => {
     }
 
     if (validationError) {
+      console.error('❌ Validation error:', validationError);
       return res.status(400).json({
         success: false,
         message: validationError,
       });
     }
+
+    console.log('✅ Final processed content:', processedContent);
 
     // Create or update submission
     const submission = existingSubmission
@@ -197,6 +252,8 @@ export const submitTaskResponse = async (req, res) => {
           },
         });
 
+    console.log('✅ Submission saved:', submission.id);
+
     // Update teen progress
     await updateTeenProgressHelper(teenId, task.challengeId);
 
@@ -208,7 +265,7 @@ export const submitTaskResponse = async (req, res) => {
       data: submission,
     });
   } catch (error) {
-    console.error('Submit task response error:', error);
+    console.error('❌ Submit task response error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
@@ -288,7 +345,6 @@ export const getMySubmissions = async (req, res) => {
 // ADMIN/STAFF ENDPOINTS
 // ============================================
 
-// ✅ UPDATED: Added month, year, and challengeId filters
 export const getReviewQueue = async (req, res) => {
   try {
     const {
@@ -298,7 +354,7 @@ export const getReviewQueue = async (req, res) => {
       month,
       year,
       page = 1,
-      limit = 100, // Increased limit for client-side filtering
+      limit = 100,
     } = req.query;
 
     console.log('📊 Review queue filters:', {
@@ -313,26 +369,21 @@ export const getReviewQueue = async (req, res) => {
 
     const where = {};
 
-    // Status filter
     if (status) {
       where.status = status;
     }
 
-    // Build task filter
     if (challengeId || taskType || month || year) {
       where.task = {};
 
-      // Challenge ID filter (specific challenge)
       if (challengeId) {
         where.task.challengeId = challengeId;
       }
 
-      // Task type filter
       if (taskType) {
         where.task.taskType = taskType;
       }
 
-      // Month/Year filters (filter on challenge)
       if (month || year) {
         where.task.challenge = {};
 
@@ -388,7 +439,7 @@ export const getReviewQueue = async (req, res) => {
           },
         },
         orderBy: {
-          submittedAt: 'desc', // Changed to desc for newest first
+          submittedAt: 'desc',
         },
         skip,
         take: parseInt(limit),
@@ -425,7 +476,6 @@ export const reviewSubmission = async (req, res) => {
     const { submissionId } = req.params;
     const { status, score, reviewNote } = req.body;
 
-    // Validate status
     if (!['APPROVED', 'REJECTED', 'PENDING'].includes(status)) {
       return res.status(400).json({
         success: false,
@@ -453,7 +503,6 @@ export const reviewSubmission = async (req, res) => {
       });
     }
 
-    // Validate score if provided
     if (score !== undefined) {
       if (score < 0 || score > submission.task.maxScore) {
         return res.status(400).json({
@@ -499,7 +548,6 @@ export const reviewSubmission = async (req, res) => {
       },
     });
 
-    // Update teen progress after review
     await updateTeenProgressHelper(
       submission.teen.id,
       submission.task.challengeId
@@ -612,7 +660,6 @@ export const deleteSubmission = async (req, res) => {
       where: { id: submissionId },
     });
 
-    // Update teen progress after deletion
     await updateTeenProgressHelper(
       submission.teenId,
       submission.task.challengeId
@@ -630,106 +677,3 @@ export const deleteSubmission = async (req, res) => {
     });
   }
 };
-
-// Helper function to update teen progress
-async function updateTeenProgress(teenId, challengeId) {
-  try {
-    // Get all tasks for the challenge
-    const tasks = await prisma.task.findMany({
-      where: { challengeId },
-    });
-
-    // Get completed submissions for this teen and challenge
-    const completedSubmissions = await prisma.submission.count({
-      where: {
-        teenId,
-        status: 'APPROVED',
-        task: {
-          challengeId,
-        },
-      },
-    });
-
-    const totalTasks = tasks.length;
-    const percentage =
-      totalTasks > 0 ? (completedSubmissions / totalTasks) * 100 : 0;
-    const isCompleted = percentage === 100;
-
-    // Update or create progress record
-    await prisma.teenProgress.upsert({
-      where: {
-        teenId_challengeId: {
-          teenId,
-          challengeId,
-        },
-      },
-      update: {
-        tasksTotal: totalTasks,
-        tasksCompleted: completedSubmissions,
-        percentage,
-        completedAt: isCompleted ? new Date() : null,
-      },
-      create: {
-        teenId,
-        challengeId,
-        tasksTotal: totalTasks,
-        tasksCompleted: completedSubmissions,
-        percentage,
-        completedAt: isCompleted ? new Date() : null,
-      },
-    });
-
-    // Update raffle eligibility if teen completed all tasks and has all badges for the year
-    if (isCompleted) {
-      const challenge = await prisma.monthlyChallenge.findUnique({
-        where: { id: challengeId },
-        select: { year: true },
-      });
-
-      await updateRaffleEligibility(teenId, challenge.year);
-    }
-  } catch (error) {
-    console.error('Update progress error:', error);
-  }
-}
-
-// Helper function to update raffle eligibility
-async function updateRaffleEligibility(teenId, year) {
-  try {
-    // Check if teen has purchased all 12 badges for the year
-    const purchasedBadges = await prisma.teenBadge.count({
-      where: {
-        teenId,
-        status: {
-          in: ['PURCHASED', 'EARNED'],
-        },
-        badge: {
-          challenge: {
-            year,
-          },
-        },
-      },
-    });
-
-    const isEligible = purchasedBadges === 12;
-
-    await prisma.raffleEntry.upsert({
-      where: {
-        teenId_year: {
-          teenId,
-          year,
-        },
-      },
-      update: {
-        isEligible,
-      },
-      create: {
-        teenId,
-        year,
-        isEligible,
-      },
-    });
-  } catch (error) {
-    console.error('Update raffle eligibility error:', error);
-  }
-}

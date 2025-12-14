@@ -102,12 +102,17 @@ export const createChallenge = async (req, res) => {
 
 export const getChallenges = async (req, res) => {
   try {
-    const { year, month, search, limit = 50 } = req.query;
+    const { year, month, search, isPublished, limit = 50 } = req.query;
 
     const where = {};
 
     if (year) where.year = parseInt(year);
     if (month) where.month = parseInt(month);
+
+    // ✅ FIXED: Handle isPublished filter
+    if (isPublished !== undefined) {
+      where.isPublished = isPublished === 'true';
+    }
 
     // MongoDB text search
     if (search) {
@@ -116,6 +121,8 @@ export const getChallenges = async (req, res) => {
         { instructions: { contains: search, mode: 'insensitive' } },
       ];
     }
+
+    console.log('📊 Fetching challenges with filters:', where);
 
     const challenges = await prisma.monthlyChallenge.findMany({
       where,
@@ -139,6 +146,8 @@ export const getChallenges = async (req, res) => {
       take: parseInt(limit),
     });
 
+    console.log(`✅ Found ${challenges.length} challenges`);
+
     res.json({
       success: true,
       data: {
@@ -147,7 +156,7 @@ export const getChallenges = async (req, res) => {
       },
     });
   } catch (error) {
-    console.error('Get challenges error:', error);
+    console.error('❌ Get challenges error:', error);
     res.status(500).json({
       success: false,
       message: 'Internal server error',
