@@ -172,26 +172,83 @@ export const submitTaskResponse = async (req, res) => {
         break;
 
       case 'CHECKLIST':
-        console.log('✅ CHECKLIST validation:', {
-          parsedContent,
-          taskOptions: task.options,
+        console.log('✅ CHECKLIST DETAILED DEBUG:', {
+          parsedContentType: typeof parsedContent,
+          parsedContent: JSON.stringify(parsedContent),
+          hasCheckedItems: 'checkedItems' in parsedContent,
           checkedItems: parsedContent.checkedItems,
+          checkedItemsType: typeof parsedContent.checkedItems,
           isArray: Array.isArray(parsedContent.checkedItems),
+          arrayLength: parsedContent.checkedItems?.length,
+          taskOptionsType: typeof task.options,
+          taskOptions: JSON.stringify(task.options),
+          hasTaskItems: task.options?.items ? true : false,
         });
 
-        // ✅ CRITICAL FIX: Validate the already-parsed content object
-        validationError = validateChecklistSubmission(
-          parsedContent,
-          task.options
-        );
+        // ✅ SIMPLE VALIDATION: Just check if checkedItems is a non-empty array
+        if (!parsedContent.checkedItems) {
+          validationError = 'Checklist items are required';
+          console.error('❌ No checkedItems property');
+        } else if (!Array.isArray(parsedContent.checkedItems)) {
+          validationError = 'Checklist must be an array';
+          console.error(
+            '❌ checkedItems is not an array:',
+            typeof parsedContent.checkedItems
+          );
+        } else if (parsedContent.checkedItems.length === 0) {
+          validationError = 'Please check at least one item';
+          console.error('❌ checkedItems array is empty');
+        } else {
+          // ✅ Optional validation: Only check against task.options if it exists and has items
+          if (task.options && typeof task.options === 'object') {
+            const taskItems = task.options.items || [];
+
+            if (Array.isArray(taskItems) && taskItems.length > 0) {
+              console.log(
+                '✅ Validating against task items:',
+                taskItems.length
+              );
+
+              const validItemIds = taskItems
+                .map((item) => item.id || item._id || item.itemId)
+                .filter(Boolean);
+
+              console.log('✅ Valid item IDs:', validItemIds);
+
+              if (validItemIds.length > 0) {
+                for (const itemId of parsedContent.checkedItems) {
+                  if (!validItemIds.includes(itemId)) {
+                    validationError = `Invalid checklist item: ${itemId}`;
+                    console.error(
+                      '❌ Invalid item ID:',
+                      itemId,
+                      'not in',
+                      validItemIds
+                    );
+                    break;
+                  }
+                }
+              } else {
+                console.log(
+                  '⚠️ No valid IDs found in task items, skipping validation'
+                );
+              }
+            } else {
+              console.log(
+                '⚠️ No items array in task options, skipping validation'
+              );
+            }
+          } else {
+            console.log('⚠️ No task options, skipping validation');
+          }
+        }
 
         if (!validationError) {
-          // parsedContent is already an object with checkedItems array
           processedContent = {
             checkedItems: parsedContent.checkedItems,
             submittedAt: new Date().toISOString(),
           };
-          console.log('✅ CHECKLIST processed:', processedContent);
+          console.log('✅ CHECKLIST processed successfully:', processedContent);
         } else {
           console.error('❌ CHECKLIST validation failed:', validationError);
         }
