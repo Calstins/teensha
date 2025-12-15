@@ -99,22 +99,54 @@ export const submitTaskResponse = async (req, res) => {
         break;
 
       case 'IMAGE':
-        if (files.length === 0) {
-          validationError = 'At least one image file is required';
-        } else {
-          // Upload images to Cloudinary
-          for (const file of files) {
-            const url = await uploadToCloudinary(
-              file.buffer,
-              file.originalname,
-              'image'
-            );
-            fileUrls.push(url);
-          }
+        console.log('📸 IMAGE submission:', {
+          filesFromMultipart: files.length,
+          parsedContent,
+          hasFileUrls: parsedContent.fileUrls ? true : false,
+        });
+
+        // ✅ CRITICAL: Check if files were already uploaded (URLs in content)
+        if (parsedContent.fileUrls && Array.isArray(parsedContent.fileUrls)) {
+          console.log('Using pre-uploaded file URLs:', parsedContent.fileUrls);
+          fileUrls = parsedContent.fileUrls;
           processedContent = {
-            description: parsedContent || '',
+            description: String(parsedContent.description || '').trim(),
             imageCount: fileUrls.length,
           };
+        } else if (files.length > 0) {
+          // Upload files from multipart (if any)
+          console.log('Uploading files from multipart');
+          try {
+            for (const file of files) {
+              console.log('Uploading file:', file.originalname);
+              const url = await uploadToCloudinary(
+                file.buffer,
+                file.originalname,
+                'image'
+              );
+              console.log('Uploaded URL:', url);
+
+              if (url && typeof url === 'string') {
+                fileUrls.push(url);
+              } else {
+                throw new Error('Invalid upload response');
+              }
+            }
+
+            console.log('All files uploaded:', fileUrls);
+
+            processedContent = {
+              description: String(
+                parsedContent.description || parsedContent || ''
+              ).trim(),
+              imageCount: fileUrls.length,
+            };
+          } catch (uploadError) {
+            console.error('Image upload error:', uploadError);
+            validationError = 'Failed to upload images: ' + uploadError.message;
+          }
+        } else {
+          validationError = 'At least one image is required';
         }
         break;
 
@@ -263,6 +295,7 @@ export const submitTaskResponse = async (req, res) => {
         }
 
         if (!validationError) {
+          // Sanitize checkedItems - ensure all are strings
           const sanitizedItems = parsedContent.checkedItems.map((item) =>
             String(item)
           );
