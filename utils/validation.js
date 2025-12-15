@@ -112,13 +112,21 @@ export const validateTextSubmission = (content) => {
   console.log('📝 validateTextSubmission:', { content, type: typeof content });
 
   // content can be either the text string directly or an object with text property
-  const text = typeof content === 'object' ? content.text : content;
+  let text;
+  if (typeof content === 'object' && content !== null) {
+    text = content.text;
+  } else {
+    text = content;
+  }
 
-  if (!text || typeof text !== 'string' || text.trim().length === 0) {
+  // Convert to string and validate
+  const textStr = String(text || '').trim();
+
+  if (!textStr || textStr.length === 0) {
     return 'Text content is required and cannot be empty';
   }
 
-  if (text.trim().length < 10) {
+  if (textStr.length < 10) {
     return 'Text content must be at least 10 characters';
   }
 
@@ -134,16 +142,24 @@ export const validateVideoSubmission = (content) => {
   console.log('🎥 validateVideoSubmission:', { content, type: typeof content });
 
   // content can be either the URL string directly or an object with videoUrl property
-  const videoUrl = typeof content === 'object' ? content.videoUrl : content;
+  let videoUrl;
+  if (typeof content === 'object' && content !== null) {
+    videoUrl = content.videoUrl;
+  } else {
+    videoUrl = content;
+  }
 
-  if (!videoUrl || typeof videoUrl !== 'string') {
+  // Convert to string and validate
+  const urlStr = String(videoUrl || '').trim();
+
+  if (!urlStr) {
     return 'Video URL is required';
   }
 
   const youtubeRegex = /^(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+$/;
   const vimeoRegex = /^(https?:\/\/)?(www\.)?vimeo\.com\/.+$/;
 
-  if (!youtubeRegex.test(videoUrl) && !vimeoRegex.test(videoUrl)) {
+  if (!youtubeRegex.test(urlStr) && !vimeoRegex.test(urlStr)) {
     return 'Please provide a valid YouTube or Vimeo URL';
   }
 
@@ -330,25 +346,37 @@ export const validateChecklistSubmission = (content, taskOptions) => {
     return 'Please check at least one item';
   }
 
-  // Validate task options
-  if (!taskOptions || !taskOptions.items || !Array.isArray(taskOptions.items)) {
-    console.error('❌ Invalid task options:', taskOptions);
-    return 'Invalid checklist configuration';
-  }
+  // ✅ UPDATED: Make validation more lenient - only validate if taskOptions.items exists
+  if (
+    taskOptions?.items &&
+    Array.isArray(taskOptions.items) &&
+    taskOptions.items.length > 0
+  ) {
+    // Validate all checked items exist in the task options
+    const validItemIds = taskOptions.items
+      .map((item) => {
+        // Handle different ID field names
+        return item.id || item._id || item.itemId;
+      })
+      .filter(Boolean); // Remove any undefined/null values
 
-  // Validate all checked items exist in the task options
-  const validItemIds = taskOptions.items.map((item) => {
-    // Handle different ID field names
-    return item.id || item._id || item.itemId;
-  });
+    console.log('✅ Valid item IDs from options:', validItemIds);
 
-  console.log('✅ Valid item IDs from options:', validItemIds);
-
-  for (const itemId of checkedItems) {
-    if (!validItemIds.includes(itemId)) {
-      console.error('❌ Invalid item ID:', itemId);
-      return `Invalid checklist item: ${itemId}`;
+    // Only validate if we have valid IDs to check against
+    if (validItemIds.length > 0) {
+      for (const itemId of checkedItems) {
+        if (!validItemIds.includes(itemId)) {
+          console.error('❌ Invalid item ID:', itemId);
+          return `Invalid checklist item: ${itemId}`;
+        }
+      }
+    } else {
+      console.log(
+        '⚠️ No valid item IDs found in task options, skipping validation'
+      );
     }
+  } else {
+    console.log('⚠️ No task options or items found, skipping item validation');
   }
 
   console.log('✅ Checklist validation passed');

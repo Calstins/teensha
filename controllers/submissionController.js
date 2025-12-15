@@ -13,7 +13,7 @@ import {
   validateFormSubmission,
   validatePickOneSubmission,
   validateChecklistSubmission,
-} from '../utils/validation.js';
+} from '../middleware/validation.js';
 import prisma from '../lib/prisma.js';
 import { uploadToCloudinary } from '../utils/fileUpload.js';
 
@@ -92,7 +92,10 @@ export const submitTaskResponse = async (req, res) => {
     switch (task.taskType) {
       case 'TEXT':
         validationError = validateTextSubmission(parsedContent);
-        processedContent = { text: parsedContent };
+        if (!validationError) {
+          const textValue = parsedContent.text || parsedContent;
+          processedContent = { text: String(textValue).trim() };
+        }
         break;
 
       case 'IMAGE':
@@ -117,10 +120,13 @@ export const submitTaskResponse = async (req, res) => {
 
       case 'VIDEO':
         validationError = validateVideoSubmission(parsedContent);
-        processedContent = {
-          videoUrl: parsedContent,
-          platform: detectVideoPlatform(parsedContent),
-        };
+        if (!validationError) {
+          const videoUrlValue = parsedContent.videoUrl || parsedContent;
+          processedContent = {
+            videoUrl: String(videoUrlValue).trim(),
+            platform: detectVideoPlatform(String(videoUrlValue)),
+          };
+        }
         break;
 
       case 'QUIZ':
@@ -131,8 +137,14 @@ export const submitTaskResponse = async (req, res) => {
         validationError = validateQuizSubmission(parsedContent, task.options);
         if (!validationError) {
           // parsedContent is already an object with answers
+          const answers = parsedContent.answers || parsedContent;
+          // Ensure all values are strings
+          const sanitizedAnswers = {};
+          Object.keys(answers).forEach((key) => {
+            sanitizedAnswers[key] = String(answers[key]);
+          });
           processedContent = {
-            answers: parsedContent.answers || parsedContent,
+            answers: sanitizedAnswers,
             submittedAt: new Date().toISOString(),
           };
         }
@@ -146,8 +158,14 @@ export const submitTaskResponse = async (req, res) => {
         validationError = validateFormSubmission(parsedContent, task.options);
         if (!validationError) {
           // parsedContent is already an object with responses
+          const responses = parsedContent.responses || parsedContent;
+          // Sanitize all responses
+          const sanitizedResponses = {};
+          Object.keys(responses).forEach((key) => {
+            sanitizedResponses[key] = String(responses[key]).trim();
+          });
           processedContent = {
-            responses: parsedContent.responses || parsedContent,
+            responses: sanitizedResponses,
             submittedAt: new Date().toISOString(),
           };
         }
@@ -164,34 +182,95 @@ export const submitTaskResponse = async (req, res) => {
         );
         if (!validationError) {
           // parsedContent is already an object with selectedOption
+          const selectedOption = parsedContent.selectedOption || parsedContent;
           processedContent = {
-            selectedOption: parsedContent.selectedOption || parsedContent,
+            selectedOption: String(selectedOption),
             submittedAt: new Date().toISOString(),
           };
         }
         break;
 
       case 'CHECKLIST':
-        console.log('✅ CHECKLIST validation:', {
-          parsedContent,
-          taskOptions: task.options,
+        console.log('✅ CHECKLIST DETAILED DEBUG:', {
+          parsedContentType: typeof parsedContent,
+          parsedContent: JSON.stringify(parsedContent),
+          hasCheckedItems: 'checkedItems' in parsedContent,
           checkedItems: parsedContent.checkedItems,
+          checkedItemsType: typeof parsedContent.checkedItems,
           isArray: Array.isArray(parsedContent.checkedItems),
+          arrayLength: parsedContent.checkedItems?.length,
+          taskOptionsType: typeof task.options,
+          taskOptions: JSON.stringify(task.options),
+          hasTaskItems: task.options?.items ? true : false,
         });
 
-        // ✅ CRITICAL FIX: Validate the already-parsed content object
-        validationError = validateChecklistSubmission(
-          parsedContent,
-          task.options
-        );
+        // ✅ SIMPLE VALIDATION: Just check if checkedItems is a non-empty array
+        if (!parsedContent.checkedItems) {
+          validationError = 'Checklist items are required';
+          console.error('❌ No checkedItems property');
+        } else if (!Array.isArray(parsedContent.checkedItems)) {
+          validationError = 'Checklist must be an array';
+          console.error(
+            '❌ checkedItems is not an array:',
+            typeof parsedContent.checkedItems
+          );
+        } else if (parsedContent.checkedItems.length === 0) {
+          validationError = 'Please check at least one item';
+          console.error('❌ checkedItems array is empty');
+        } else {
+          // ✅ Optional validation: Only check against task.options if it exists and has items
+          if (task.options && typeof task.options === 'object') {
+            const taskItems = task.options.items || [];
+
+            if (Array.isArray(taskItems) && taskItems.length > 0) {
+              console.log(
+                '✅ Validating against task items:',
+                taskItems.length
+              );
+
+              const validItemIds = taskItems
+                .map((item) => item.id || item._id || item.itemId)
+                .filter(Boolean);
+
+              console.log('✅ Valid item IDs:', validItemIds);
+
+              if (validItemIds.length > 0) {
+                for (const itemId of parsedContent.checkedItems) {
+                  if (!validItemIds.includes(itemId)) {
+                    validationError = `Invalid checklist item: ${itemId}`;
+                    console.error(
+                      '❌ Invalid item ID:',
+                      itemId,
+                      'not in',
+                      validItemIds
+                    );
+                    break;
+                  }
+                }
+              } else {
+                console.log(
+                  '⚠️ No valid IDs found in task items, skipping validation'
+                );
+              }
+            } else {
+              console.log(
+                '⚠️ No items array in task options, skipping validation'
+              );
+            }
+          } else {
+            console.log('⚠️ No task options, skipping validation');
+          }
+        }
 
         if (!validationError) {
-          // parsedContent is already an object with checkedItems array
+          const sanitizedItems = parsedContent.checkedItems.map((item) =>
+            String(item)
+          );
           processedContent = {
-            checkedItems: parsedContent.checkedItems,
+            checkedItems: sanitizedItems,
             submittedAt: new Date().toISOString(),
           };
-          console.log('✅ CHECKLIST processed:', processedContent);
+          console.log('✅ CHECKLIST processed successfully:', processedContent);
         } else {
           console.error('❌ CHECKLIST validation failed:', validationError);
         }
