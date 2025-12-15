@@ -13,7 +13,7 @@ import {
   validateFormSubmission,
   validatePickOneSubmission,
   validateChecklistSubmission,
-} from '../middleware/validation.js';
+} from '../utils/validation.js';
 import prisma from '../lib/prisma.js';
 import { uploadToCloudinary } from '../utils/fileUpload.js';
 
