@@ -60,7 +60,6 @@ app.use('/api/progress', progressRoutes);
 app.use('/api/raffle', raffleRoutes);
 app.use('/api/admin/transactions', transactionRoutes);
 app.use('/api/upload', uploadRoutes); // ✅ ADD THIS ROUTE
-
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
@@ -75,7 +74,7 @@ app.get('/', (req, res) => {
       progress: '/api/progress',
       raffle: '/api/raffle',
       webhooks: '/api/webhooks',
-      upload: '/api/upload', // ✅ ADD THIS
+      upload: '/api/upload', 
     },
   });
 });

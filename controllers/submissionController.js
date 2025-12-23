@@ -1,4 +1,4 @@
-// controllers/submissionController.js - FIXED VERSION
+// controllers/submissionController.js
 import { validationResult } from 'express-validator';
 import {
   updateTeenProgressHelper,

@@ -1,7 +1,7 @@
 // scripts/cleanup-database.js
 // WARNING: This script deletes ALL data except Users (Admin/Staff accounts)
 // Use with extreme caution!
-
+import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 import readline from 'readline';
 
