@@ -1,13 +1,14 @@
 // controllers/challengeController.js
 import { validationResult } from 'express-validator';
 import prisma from '../lib/prisma.js';
-import { handleValidationErrors } from '../middleware/validation.js';
+// Validation is handled in adminRoutes.js via handleValidationErrors middleware
 import { sendChallengeNotification } from '../utils/notifications.js';
 import { sendNotificationToAllTeensMobile } from './notificationController.js';
 
 export const createChallenge = async (req, res) => {
   try {
-    handleValidationErrors(req, res, () => {});
+    // NOTE: Validation is already handled by the route middleware (handleValidationErrors).
+    // Do NOT call handleValidationErrors here — it would intercept the response incorrectly.
 
     const {
       year,
@@ -28,29 +29,35 @@ export const createChallenge = async (req, res) => {
     });
 
     if (existing) {
+      const monthName = new Date(year, month - 1).toLocaleDateString('en-US', {
+        month: 'long',
+        year: 'numeric',
+      });
       return res.status(400).json({
         success: false,
-        message: `A challenge already exists for ${new Date(
-          year,
-          month - 1
-        ).toLocaleDateString('en-US', {
-          month: 'long',
-          year: 'numeric',
-        })}. Only one challenge is allowed per month.`,
+        message: `A challenge already exists for ${monthName}. Only one challenge is allowed per month. Please choose a different month or update the existing challenge.`,
       });
     }
 
-    // Validate badge data is provided (required for each challenge)
-    if (
-      !badgeData ||
-      !badgeData.name ||
-      !badgeData.imageUrl ||
-      !badgeData.price
-    ) {
+    // Validate badge data completeness (route validator catches missing fields,
+    // but this guard catches missing description which is required in the DB schema)
+    if (!badgeData) {
       return res.status(400).json({
         success: false,
-        message:
-          'Badge information is required when creating a challenge. Each challenge must have exactly one badge.',
+        message: 'Badge information is required — every challenge must have a badge. Please fill in the badge name, description, image URL, and price.',
+      });
+    }
+
+    const missingBadgeFields = [];
+    if (!badgeData.name) missingBadgeFields.push('name');
+    if (!badgeData.description) missingBadgeFields.push('description');
+    if (!badgeData.imageUrl) missingBadgeFields.push('imageUrl');
+    if (badgeData.price === undefined || badgeData.price === null) missingBadgeFields.push('price');
+
+    if (missingBadgeFields.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `Missing required badge fields: ${missingBadgeFields.join(', ')}. Please provide all badge information before creating the challenge.`,
       });
     }
 
@@ -249,32 +256,31 @@ export const publishChallenge = async (req, res) => {
       },
     });
 
-    // Send notification to all active teens
+    // Send notifications — fire both but don't fail the request if either errors
     try {
       await sendChallengeNotification(updated);
     } catch (notificationError) {
-      console.error('Failed to send notifications:', notificationError);
-      // Don't fail the request if notifications fail
+      console.error('Failed to send email notifications:', notificationError);
     }
 
-    res.json({
+    try {
+      await sendNotificationToAllTeensMobile(
+        '🎯 New Challenge Available!',
+        `${updated.theme} is now live! Start earning your badge today.`,
+        {
+          type: 'CHALLENGE_PUBLISHED',
+          challengeId: updated.id,
+        }
+      );
+    } catch (pushError) {
+      console.error('Failed to send push notifications:', pushError);
+    }
+
+    // Single response — a second res.json() after this would crash with
+    // "Cannot set headers after they are sent to the client"
+    return res.json({
       success: true,
       message: 'Challenge published successfully and notifications sent',
-      data: updated,
-    });
-
-    await sendNotificationToAllTeensMobile(
-      '🎯 New Challenge Available!',
-      `${updated.theme} is now live! Start earning your badge today.`,
-      {
-        type: 'CHALLENGE_PUBLISHED',
-        challengeId: updated.id,
-      }
-    );
-
-    res.json({
-      success: true,
-      message: 'Challenge published and notifications sent',
       data: updated,
     });
   } catch (error) {

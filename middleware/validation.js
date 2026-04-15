@@ -1,23 +1,38 @@
 // middleware/validation.js
 import { validationResult } from 'express-validator';
 
+/**
+ * Handles express-validator errors and returns a structured, admin-friendly response.
+ * This must be placed AFTER the validator array in the route and BEFORE the controller.
+ */
 export const handleValidationErrors = (req, res, next) => {
   const errors = validationResult(req);
 
   if (!errors.isEmpty()) {
+    const formattedErrors = errors.array().map((error) => ({
+      field: error.path,
+      message: error.msg,
+      receivedValue: error.value,
+    }));
+
+    // Build a readable summary for the admin
+    const summary = formattedErrors.map((e) => `"${e.field}": ${e.message}`).join(' | ');
+
     return res.status(400).json({
       success: false,
-      message: 'Validation failed',
-      errors: errors.array().map((error) => ({
-        field: error.path,
-        message: error.msg,
-        value: error.value,
-      })),
+      message: `Please fix the following issue(s): ${summary}`,
+      errors: formattedErrors,
     });
   }
 
   next();
 };
+
+// ============================================
+// SUBMISSION CONTENT VALIDATORS
+// These are used inside controllers (not as route middleware) to validate
+// the content object of a teen's task submission.
+// ============================================
 
 export function validateTextSubmission(content) {
   if (!content || typeof content !== 'string') {
@@ -48,15 +63,9 @@ export function validateVideoSubmission(content) {
 }
 
 export function detectVideoPlatform(url) {
-  if (url.includes('youtube.com') || url.includes('youtu.be')) {
-    return 'YouTube';
-  }
-  if (url.includes('vimeo.com')) {
-    return 'Vimeo';
-  }
-  if (url.includes('dailymotion.com')) {
-    return 'Dailymotion';
-  }
+  if (url.includes('youtube.com') || url.includes('youtu.be')) return 'YouTube';
+  if (url.includes('vimeo.com')) return 'Vimeo';
+  if (url.includes('dailymotion.com')) return 'Dailymotion';
   return 'Unknown';
 }
 
@@ -81,7 +90,6 @@ export function validateQuizSubmission(content, taskOptions) {
     return `Expected ${questions.length} answers, got ${answers.length}`;
   }
 
-  // Validate each answer has required fields
   for (let i = 0; i < answers.length; i++) {
     if (!answers[i].questionId || answers[i].answer === undefined) {
       return `Answer ${i + 1} is incomplete`;
@@ -110,7 +118,6 @@ export function validateFormSubmission(content, taskOptions) {
   const fields = taskOptions?.fields || [];
   const requiredFields = fields.filter((f) => f.required);
 
-  // Check all required fields are present
   for (const field of requiredFields) {
     if (!responses[field.id] || responses[field.id].trim() === '') {
       return `Field "${field.label}" is required`;
@@ -154,7 +161,6 @@ export function validateChecklistSubmission(content, taskOptions) {
   const items = taskOptions?.items || [];
   const requiredItems = items.filter((item) => item.required);
 
-  // Check all required items are checked
   for (const item of requiredItems) {
     if (!checkedItems.includes(item.id)) {
       return `Required item "${item.text}" must be checked`;
