@@ -1,20 +1,11 @@
 //teensha/controllers/adminController.js
 import bcrypt from 'bcryptjs';
 import prisma from '../lib/prisma.js';
-import { validationResult } from 'express-validator';
-import { sendChallengeNotification } from '../utils/notifications.js';
-import { handleValidationErrors } from '../middleware/validation.js';
 
 export const createStaff = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array(),
-      });
-    }
+    // NOTE: Validation is already handled by the route middleware (handleValidationErrors).
+    // Do NOT call validationResult here — it is already applied before this controller runs.
 
     const { email, password, name, role } = req.body;
 
@@ -141,14 +132,7 @@ export const getAllStaff = async (req, res) => {
 
 export const updateStaff = async (req, res) => {
   try {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        success: false,
-        message: 'Validation failed',
-        errors: errors.array(),
-      });
-    }
+    // NOTE: Validation is already handled by the route middleware (handleValidationErrors).
 
     const { userId } = req.params;
     const allowedUpdates = ['name', 'role', 'isActive'];
