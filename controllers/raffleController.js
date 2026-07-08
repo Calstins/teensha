@@ -15,13 +15,12 @@ export const checkRaffleEligibility = async (req, res) => {
       },
     });
 
-    // Get purchased badges count for the year
+    // Get purchased badges count for the year — raffle eligibility is tied
+    // specifically to purchases, not to free-earned badges.
     const purchasedBadgesCount = await prisma.teenBadge.count({
       where: {
         teenId: req.teen.id,
-        status: {
-          in: ['PURCHASED', 'EARNED'],
-        },
+        isPurchased: true,
         badge: {
           challenge: {
             year: parseInt(year),

@@ -323,7 +323,7 @@ export const initializeBadgePurchase = async (req, res) => {
       },
     });
 
-    if (existingBadge && existingBadge.status === 'PURCHASED') {
+    if (existingBadge && existingBadge.isPurchased) {
       return res.status(400).json({
         success: false,
         message: 'Badge already purchased',
@@ -417,7 +417,25 @@ export const verifyBadgePurchase = async (req, res) => {
     }
 
     const { metadata } = verification.data;
-    const { badgeId, challengeId, teenId } = metadata;
+    const { badgeId, challengeId, teenId } = metadata || {};
+
+    if (!badgeId || !teenId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Transaction metadata is incomplete',
+      });
+    }
+
+    // Bind the verified transaction to the caller. The metadata is set by us at
+    // initialize time, but the reference is a user-supplied URL param — a teen
+    // must only be able to finalize a purchase that belongs to their own
+    // account, never one whose metadata names a different teen.
+    if (teenId !== req.teen.id) {
+      return res.status(403).json({
+        success: false,
+        message: 'This transaction does not belong to your account',
+      });
+    }
 
     // Get badge details
     const badge = await prisma.badge.findUnique({
@@ -438,7 +456,35 @@ export const verifyBadgePurchase = async (req, res) => {
       });
     }
 
-    // Update teen badge record to PURCHASED
+    // Validate the amount actually paid matches the badge price (in kobo).
+    // Guards against price drift between initialize and verify, and against
+    // any partial/under-payment being accepted as a full purchase.
+    const expectedAmount = Math.round(badge.price * 100);
+    if (
+      typeof verification.data.amount === 'number' &&
+      verification.data.amount < expectedAmount
+    ) {
+      return res.status(400).json({
+        success: false,
+        message: 'Paid amount does not match the badge price',
+      });
+    }
+
+    // ✅ Purchasing is an OPTIONAL add-on, tracked via `isPurchased` — it is
+    // intentionally kept separate from `status`/EARNED, which is granted for
+    // free purely by completing the challenge's tasks (see
+    // grantEarnedBadgeIfCompleted in utils/helpers.js). A purchase must never
+    // downgrade an already-EARNED badge, and it must never be required to
+    // reach EARNED.
+    const existing = await prisma.teenBadge.findUnique({
+      where: {
+        teenId_badgeId: {
+          teenId,
+          badgeId,
+        },
+      },
+    });
+
     const teenBadge = await prisma.teenBadge.upsert({
       where: {
         teenId_badgeId: {
@@ -447,36 +493,23 @@ export const verifyBadgePurchase = async (req, res) => {
         },
       },
       update: {
-        status: 'PURCHASED',
+        isPurchased: true,
         purchasedAt: new Date(),
+        // Only move an AVAILABLE badge to PURCHASED. Never touch a badge
+        // that's already EARNED — purchasing afterwards is just a bonus,
+        // not a status change.
+        ...(existing && existing.status === 'EARNED'
+          ? {}
+          : { status: 'PURCHASED' }),
       },
       create: {
         teenId,
         badgeId,
         status: 'PURCHASED',
+        isPurchased: true,
         purchasedAt: new Date(),
       },
     });
-
-    // Check if teen completed the challenge and update badge status
-    const progress = await prisma.teenProgress.findUnique({
-      where: {
-        teenId_challengeId: {
-          teenId,
-          challengeId,
-        },
-      },
-    });
-
-    if (progress && progress.percentage === 100) {
-      await prisma.teenBadge.update({
-        where: { id: teenBadge.id },
-        data: {
-          status: 'EARNED',
-          earnedAt: new Date(),
-        },
-      });
-    }
 
     // Update raffle eligibility
     await updateRaffleEligibilityHelper(teenId, badge.challenge.year);
@@ -492,8 +525,9 @@ export const verifyBadgePurchase = async (req, res) => {
           imageUrl: badge.imageUrl,
           price: badge.price,
         },
-        status: progress?.percentage === 100 ? 'EARNED' : 'PURCHASED',
-        purchasedAt: new Date(),
+        status: teenBadge.status,
+        isPurchased: teenBadge.isPurchased,
+        purchasedAt: teenBadge.purchasedAt,
         paymentReference: reference,
       },
     });
@@ -568,6 +602,7 @@ export const getMyBadges = async (req, res) => {
         },
         challenge: tb.badge.challenge,
         status: tb.status,
+        isPurchased: tb.isPurchased,
         purchasedAt: tb.purchasedAt,
         earnedAt: tb.earnedAt,
       })),
@@ -616,13 +651,13 @@ export const getBadgeStats = async (req, res) => {
       _count: true,
     });
 
-    // Get all purchased/earned badges with their prices
+    // ✅ Revenue must be based on actual purchases (isPurchased), not on
+    // `status`. Since badges are earned for free by completing a challenge's
+    // tasks, `status: 'EARNED'` no longer implies any payment was made.
     const purchasedBadges = await prisma.teenBadge.findMany({
       where: {
         ...whereClause,
-        status: {
-          in: ['PURCHASED', 'EARNED'],
-        },
+        isPurchased: true,
       },
       include: {
         badge: {
@@ -646,6 +681,7 @@ export const getBadgeStats = async (req, res) => {
           acc[stat.status.toLowerCase()] = stat._count;
           return acc;
         }, {}),
+        totalPurchased: purchasedBadges.length,
         totalRevenue,
       },
     });

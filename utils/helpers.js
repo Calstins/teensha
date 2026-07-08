@@ -100,6 +100,16 @@ export const updateTeenProgressHelper = async (teenId, challengeId) => {
       },
     });
 
+    // ✅ NON-PAYMENT PROGRESSION PATH:
+    // Completing a challenge's tasks earns its badge for free — no purchase
+    // required. Payment (see badgeController) only ever sets an independent
+    // `isPurchased` flag for teens who *choose* to buy a related product.
+    // We only ever grant EARNED here; we never revoke it, so a later edit or
+    // deletion of a submission can't claw back a badge a teen already earned.
+    if (isCompleted && totalTasks > 0) {
+      await grantEarnedBadgeIfCompleted(teenId, challengeId);
+    }
+
     return { totalTasks, completedSubmissions, percentage, isCompleted };
   } catch (error) {
     console.error('Update progress helper error:', error);
@@ -107,15 +117,71 @@ export const updateTeenProgressHelper = async (teenId, challengeId) => {
   }
 };
 
+// Grant a teen's badge as EARNED (free) once they've completed 100% of a
+// challenge's tasks. Independent of any purchase. Idempotent and safe to
+// call repeatedly — never downgrades an already-EARNED badge.
+export const grantEarnedBadgeIfCompleted = async (teenId, challengeId) => {
+  try {
+    const badge = await prisma.badge.findUnique({
+      where: { challengeId },
+    });
+
+    if (!badge || !badge.isActive) {
+      return null;
+    }
+
+    const existing = await prisma.teenBadge.findUnique({
+      where: {
+        teenId_badgeId: {
+          teenId,
+          badgeId: badge.id,
+        },
+      },
+    });
+
+    if (existing && existing.status === 'EARNED') {
+      return existing;
+    }
+
+    const teenBadge = await prisma.teenBadge.upsert({
+      where: {
+        teenId_badgeId: {
+          teenId,
+          badgeId: badge.id,
+        },
+      },
+      update: {
+        status: 'EARNED',
+        earnedAt: new Date(),
+      },
+      create: {
+        teenId,
+        badgeId: badge.id,
+        status: 'EARNED',
+        earnedAt: new Date(),
+      },
+    });
+
+    return teenBadge;
+  } catch (error) {
+    console.error('Grant earned badge helper error:', error);
+    // Don't let badge-granting failures block progress tracking
+    return null;
+  }
+};
+
 // Update raffle eligibility helper
+// Raffle eligibility is intentionally tied to PURCHASES specifically (not to
+// free EARNED badges). Earning a badge is always free and never required to
+// progress; purchasing 12 badges in a year is what qualifies a teen for the
+// annual raffle draw — this is the concrete, optional benefit of purchasing
+// that should be surfaced to users wherever a purchase is offered.
 export const updateRaffleEligibilityHelper = async (teenId, year) => {
   try {
     const purchasedBadges = await prisma.teenBadge.count({
       where: {
         teenId,
-        status: {
-          in: ['PURCHASED', 'EARNED'],
-        },
+        isPurchased: true,
         badge: {
           challenge: {
             year,

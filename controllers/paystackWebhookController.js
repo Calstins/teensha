@@ -5,13 +5,29 @@ import { updateRaffleEligibilityHelper } from '../utils/helpers.js';
 
 export const handlePaystackWebhook = async (req, res) => {
   try {
-    // Verify webhook signature
+    // This route is mounted with express.raw(), so req.body is a Buffer of the
+    // exact bytes Paystack sent. Paystack signs that RAW payload — so the HMAC
+    // must be computed over the buffer itself. (Previously this used
+    // JSON.stringify(req.body), which on a Buffer yields
+    // '{"type":"Buffer","data":[...]}' and never matched the signature — the
+    // webhook rejected every legitimate event with 401.)
+    const rawBody = Buffer.isBuffer(req.body)
+      ? req.body
+      : Buffer.from(JSON.stringify(req.body));
+
     const hash = crypto
       .createHmac('sha512', process.env.PAYSTACK_SECRET_KEY)
-      .update(JSON.stringify(req.body))
+      .update(rawBody)
       .digest('hex');
 
-    if (hash !== req.headers['x-paystack-signature']) {
+    const signature = req.headers['x-paystack-signature'] || '';
+
+    // Timing-safe comparison (both are fixed-length hex of equal length here).
+    const valid =
+      signature.length === hash.length &&
+      crypto.timingSafeEqual(Buffer.from(hash), Buffer.from(signature));
+
+    if (!valid) {
       console.error('Invalid webhook signature');
       return res.status(401).json({
         success: false,
@@ -19,7 +35,8 @@ export const handlePaystackWebhook = async (req, res) => {
       });
     }
 
-    const event = req.body;
+    // Parse the verified raw payload into the event object.
+    const event = JSON.parse(rawBody.toString('utf8'));
     console.log('Paystack webhook event:', event.event);
 
     switch (event.event) {
@@ -98,8 +115,20 @@ async function handleSuccessfulCharge(data) {
       },
     });
 
-    // Update teen badge record
-    const teenBadge = await prisma.teenBadge.upsert({
+    // ✅ Purchasing is an OPTIONAL add-on tracked via `isPurchased`, kept
+    // separate from `status`/EARNED (which is granted for free purely by
+    // completing the challenge's tasks — see grantEarnedBadgeIfCompleted in
+    // utils/helpers.js). Never downgrade an already-EARNED badge.
+    const existingTeenBadge = await prisma.teenBadge.findUnique({
+      where: {
+        teenId_badgeId: {
+          teenId,
+          badgeId,
+        },
+      },
+    });
+
+    await prisma.teenBadge.upsert({
       where: {
         teenId_badgeId: {
           teenId,
@@ -107,36 +136,20 @@ async function handleSuccessfulCharge(data) {
         },
       },
       update: {
-        status: 'PURCHASED',
+        isPurchased: true,
         purchasedAt: new Date(paid_at),
+        ...(existingTeenBadge && existingTeenBadge.status === 'EARNED'
+          ? {}
+          : { status: 'PURCHASED' }),
       },
       create: {
         teenId,
         badgeId,
         status: 'PURCHASED',
+        isPurchased: true,
         purchasedAt: new Date(paid_at),
       },
     });
-
-    // Check if teen completed the challenge
-    const progress = await prisma.teenProgress.findUnique({
-      where: {
-        teenId_challengeId: {
-          teenId,
-          challengeId,
-        },
-      },
-    });
-
-    if (progress && progress.percentage === 100) {
-      await prisma.teenBadge.update({
-        where: { id: teenBadge.id },
-        data: {
-          status: 'EARNED',
-          earnedAt: new Date(),
-        },
-      });
-    }
 
     // Update raffle eligibility
     await updateRaffleEligibilityHelper(teenId, badge.challenge.year);

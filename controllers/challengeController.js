@@ -453,6 +453,7 @@ export const getCurrentChallenge = async (req, res) => {
           ? {
               ...challenge.badge,
               status: teenBadge?.status || 'AVAILABLE',
+              isPurchased: teenBadge?.isPurchased || false,
               purchasedAt: teenBadge?.purchasedAt || null,
               earnedAt: teenBadge?.earnedAt || null,
             }
@@ -945,6 +946,7 @@ export const getChallengeByIdForTeen = async (req, res) => {
           ? {
               ...challenge.badge,
               status: teenBadge?.status || 'AVAILABLE',
+              isPurchased: teenBadge?.isPurchased || false,
               purchasedAt: teenBadge?.purchasedAt || null,
               earnedAt: teenBadge?.earnedAt || null,
             }

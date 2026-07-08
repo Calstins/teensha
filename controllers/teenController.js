@@ -362,23 +362,34 @@ export const getDashboard = async (req, res) => {
     });
 
     // Get teen's stats
-    const [totalSubmissions, totalBadges, yearlyProgress] = await Promise.all([
-      prisma.submission.count({
-        where: { teenId: req.teen.id },
-      }),
-      prisma.teenBadge.count({
-        where: {
-          teenId: req.teen.id,
-          status: { in: ['PURCHASED', 'EARNED'] },
-        },
-      }),
-      prisma.teenProgress.findMany({
-        where: {
-          teenId: req.teen.id,
-          challenge: { year: currentYear },
-        },
-      }),
-    ]);
+    const [totalSubmissions, totalBadges, purchasedBadgeCount, yearlyProgress] =
+      await Promise.all([
+        prisma.submission.count({
+          where: { teenId: req.teen.id },
+        }),
+        prisma.teenBadge.count({
+          where: {
+            teenId: req.teen.id,
+            status: { in: ['PURCHASED', 'EARNED'] },
+          },
+        }),
+        // Purchases made this year — this is what counts toward raffle
+        // eligibility (12 purchases/year). Earning badges is always free
+        // and doesn't affect this number.
+        prisma.teenBadge.count({
+          where: {
+            teenId: req.teen.id,
+            isPurchased: true,
+            badge: { challenge: { year: currentYear } },
+          },
+        }),
+        prisma.teenProgress.findMany({
+          where: {
+            teenId: req.teen.id,
+            challenge: { year: currentYear },
+          },
+        }),
+      ]);
 
     // Calculate yearly stats
     const completedChallenges = yearlyProgress.filter(
@@ -461,6 +472,13 @@ export const getDashboard = async (req, res) => {
           totalBadges,
           completedChallenges,
           averageProgress: Math.round(averageProgress * 100) / 100,
+        },
+        raffle: {
+          year: currentYear,
+          purchasedBadges: purchasedBadgeCount,
+          requiredBadges: 12,
+          isEligible: purchasedBadgeCount >= 12,
+          badgesRemaining: Math.max(0, 12 - purchasedBadgeCount),
         },
         currentChallenge: currentChallenge
           ? {
