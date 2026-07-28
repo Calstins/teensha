@@ -36,6 +36,7 @@ import {
   initializeBadgePurchase,
   verifyBadgePurchase,
   getMyBadges,
+  getPurchaseOverview,
 } from '../controllers/badgeController.js';
 
 import {
@@ -174,5 +175,6 @@ router.get(
 );
 
 router.get('/badges/my-badges', authenticateTeen, getMyBadges);
+router.get('/badges/purchase-overview', authenticateTeen, getPurchaseOverview);
 
 export default router;

@@ -693,3 +693,89 @@ export const getBadgeStats = async (req, res) => {
     });
   }
 };
+
+// ✅ Purchase overview for a given year: every monthly challenge's badge,
+// each tagged with this teen's purchase status — including challenges the
+// teen has never opened or engaged with (getMyBadges only returns badges the
+// teen already has a TeenBadge row for, which misses those entirely). Used
+// by the raffle purchase-overview screen so a teen can see and optionally
+// purchase every badge for the year in one place. Earning remains free and
+// entirely separate — this endpoint is purely about the optional purchase
+// side of things.
+export const getPurchaseOverview = async (req, res) => {
+  try {
+    const year = parseInt(req.query.year) || new Date().getFullYear();
+    const teenId = req.teen.id;
+
+    const challenges = await prisma.monthlyChallenge.findMany({
+      where: { year },
+      orderBy: { month: 'asc' },
+      include: {
+        badge: true,
+      },
+    });
+
+    const badgeIds = challenges
+      .filter((c) => c.badge)
+      .map((c) => c.badge.id);
+
+    const teenBadges = await prisma.teenBadge.findMany({
+      where: {
+        teenId,
+        badgeId: { in: badgeIds },
+      },
+    });
+    const teenBadgeByBadgeId = new Map(
+      teenBadges.map((tb) => [tb.badgeId, tb])
+    );
+
+    const items = challenges
+      .filter((c) => c.badge)
+      .map((c) => {
+        const tb = teenBadgeByBadgeId.get(c.badge.id);
+        return {
+          challenge: {
+            id: c.id,
+            year: c.year,
+            month: c.month,
+            theme: c.theme,
+          },
+          badge: {
+            id: c.badge.id,
+            name: c.badge.name,
+            description: c.badge.description,
+            imageUrl: c.badge.imageUrl,
+            price: c.badge.price,
+          },
+          status: tb?.status || 'AVAILABLE',
+          isPurchased: tb?.isPurchased || false,
+          purchasedAt: tb?.purchasedAt || null,
+          earnedAt: tb?.earnedAt || null,
+        };
+      });
+
+    const purchased = items.filter((i) => i.isPurchased);
+    const notPurchased = items.filter((i) => !i.isPurchased);
+
+    res.json({
+      success: true,
+      data: {
+        year,
+        raffle: {
+          purchasedBadges: purchased.length,
+          requiredBadges: 12,
+          isEligible: purchased.length >= 12,
+          badgesRemaining: Math.max(0, 12 - purchased.length),
+        },
+        purchased,
+        notPurchased,
+      },
+    });
+  } catch (error) {
+    console.error('Get purchase overview error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+    });
+  }
+};

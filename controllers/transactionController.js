@@ -225,20 +225,42 @@ export const getTransactionAnalytics = async (req, res) => {
     });
 
     // Monthly revenue (last 12 months)
+    // NOTE: this datasource is MongoDB (see prisma/schema.prisma), which has
+    // no SQL engine — `prisma.$queryRaw` with raw PostgreSQL (DATE_TRUNC,
+    // "::int" casts, a literal `FROM transactions` table) previously sat
+    // here and would throw on every call, since Prisma's MongoDB connector
+    // doesn't support SQL raw queries at all. That failure happened inside
+    // this function's try block, so it took down the whole analytics
+    // response (Top Spenders, Payment Methods, Avg. Transaction all show
+    // "No data" on the admin Transactions page as a result). Fixed by
+    // fetching the raw rows and grouping by month in JS instead — small,
+    // portable, and correct on any Prisma datasource.
     const twelveMonthsAgo = new Date();
     twelveMonthsAgo.setMonth(twelveMonthsAgo.getMonth() - 12);
 
-    const monthlyRevenue = await prisma.$queryRaw`
-      SELECT 
-        DATE_TRUNC('month', "createdAt") as month,
-        COUNT(*)::int as count,
-        SUM(amount)::float as revenue
-      FROM transactions
-      WHERE status = 'SUCCESS'
-        AND "createdAt" >= ${twelveMonthsAgo}
-      GROUP BY DATE_TRUNC('month', "createdAt")
-      ORDER BY month ASC
-    `;
+    const recentSuccessTransactions = await prisma.transaction.findMany({
+      where: {
+        status: 'SUCCESS',
+        createdAt: { gte: twelveMonthsAgo },
+      },
+      select: {
+        createdAt: true,
+        amount: true,
+      },
+    });
+
+    const monthlyRevenueMap = new Map();
+    for (const tx of recentSuccessTransactions) {
+      const d = new Date(tx.createdAt);
+      const monthKey = new Date(d.getFullYear(), d.getMonth(), 1).toISOString();
+      const existing = monthlyRevenueMap.get(monthKey) || { count: 0, revenue: 0 };
+      existing.count += 1;
+      existing.revenue += tx.amount || 0;
+      monthlyRevenueMap.set(monthKey, existing);
+    }
+    const monthlyRevenue = Array.from(monthlyRevenueMap.entries())
+      .map(([month, stats]) => ({ month, count: stats.count, revenue: stats.revenue }))
+      .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
 
     // Top spending teens
     const topSpenders = await prisma.transaction.groupBy({
