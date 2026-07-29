@@ -1,15 +1,9 @@
 // utils/notifications.js
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST,
-  port: process.env.EMAIL_PORT,
-  secure: false,
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
-});
+const resend = new Resend(process.env.RESEND_API_KEY);
+const EMAIL_FROM =
+  process.env.EMAIL_FROM || 'TeenShapers <onboarding@resend.dev>';
 
 /**
  * Send notification to all active teens when a challenge is published
@@ -22,12 +16,13 @@ const transporter = nodemailer.createTransport({
 
 export const sendEmail = async (to, subject, html) => {
   try {
-    await transporter.sendMail({
-      from: process.env.EMAIL_USER,
+    const { error } = await resend.emails.send({
+      from: EMAIL_FROM,
       to,
       subject,
       html,
     });
+    if (error) throw error;
     console.log(`Email sent to ${to}: ${subject}`);
   } catch (error) {
     console.error('Email send error:', error);
@@ -57,7 +52,7 @@ export const sendChallengeNotification = async (challenge) => {
     const notificationPromises = activeTeens.map(async (teen) => {
       // TODO: Implement your notification logic here
       // Examples:
-      // - Send email using nodemailer, sendgrid, etc.
+      // - Send email using Resend (see sendEmail() above)
       // - Send push notification using Firebase Cloud Messaging
       // - Create in-app notification record
 

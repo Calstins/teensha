@@ -3,22 +3,23 @@
 // Handles verification emails, password reset emails, and welcome emails
 // Updated with TeenShapers brand colors and fonts
 
-import nodemailer from 'nodemailer';
+import { Resend } from 'resend';
 import jwt from 'jsonwebtoken';
 
 /**
- * Create and configure email transporter
- * @returns {object} Nodemailer transporter instance
+ * Resend client instance, used to send all transactional emails.
+ * Requires RESEND_API_KEY to be set in the environment.
  */
-const createTransporter = () => {
-  return nodemailer.createTransport({
-    service: process.env.EMAIL_SERVICE || 'gmail',
-    auth: {
-      user: process.env.EMAIL_USER,
-      pass: process.env.EMAIL_PASSWORD,
-    },
-  });
-};
+const resend = new Resend(process.env.RESEND_API_KEY);
+
+/**
+ * The "from" address used for outgoing emails.
+ * Must be on a domain verified in your Resend account.
+ * Falls back to Resend's shared test domain if not set (only works for
+ * sending to your own verified Resend account email in that case).
+ */
+const EMAIL_FROM =
+  process.env.EMAIL_FROM || 'TeenShapers <onboarding@resend.dev>';
 
 export const generateVerificationToken = (teenId) => {
   return jwt.sign(
@@ -203,14 +204,12 @@ const getEmailStyles = () => `
 `;
 
 export const sendVerificationEmail = async (email, name, verificationToken) => {
-  const transporter = createTransporter();
-
   const verificationUrl = `${
     process.env.APP_URL || 'https://teensha.vercel.app'
   }/api/auth/verify-email?token=${verificationToken}`;
 
   const mailOptions = {
-    from: `"TeenShapers" <${process.env.EMAIL_USER}>`,
+    from: EMAIL_FROM,
     to: email,
     subject: 'Verify Your TeenShapers Account 🎉',
     html: `
@@ -282,7 +281,8 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const { error } = await resend.emails.send(mailOptions);
+    if (error) throw error;
     console.log('✅ Verification email sent to:', email);
   } catch (error) {
     console.error('❌ Error sending verification email:', error);
@@ -291,8 +291,6 @@ export const sendVerificationEmail = async (email, name, verificationToken) => {
 };
 
 export const sendPasswordResetEmail = async (email, name, resetToken) => {
-  const transporter = createTransporter();
-
   // For mobile app deep linking
   const resetUrl = `teenshapers://reset-password?token=${resetToken}`;
   // Fallback web URL
@@ -301,7 +299,7 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
   }/reset-password?token=${resetToken}`;
 
   const mailOptions = {
-    from: `"TeenShapers" <${process.env.EMAIL_USER}>`,
+    from: EMAIL_FROM,
     to: email,
     subject: 'Reset Your TeenShapers Password 🔐',
     html: `
@@ -374,7 +372,8 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const { error } = await resend.emails.send(mailOptions);
+    if (error) throw error;
     console.log('✅ Password reset email sent to:', email);
   } catch (error) {
     console.error('❌ Error sending password reset email:', error);
@@ -383,10 +382,8 @@ export const sendPasswordResetEmail = async (email, name, resetToken) => {
 };
 
 export const sendWelcomeEmail = async (email, name) => {
-  const transporter = createTransporter();
-
   const mailOptions = {
-    from: `"TeenShapers" <${process.env.EMAIL_USER}>`,
+    from: EMAIL_FROM,
     to: email,
     subject: "Welcome to TeenShapers! You're All Set! 🎉",
     html: `
@@ -481,7 +478,8 @@ export const sendWelcomeEmail = async (email, name) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const { error } = await resend.emails.send(mailOptions);
+    if (error) throw error;
     console.log('✅ Welcome email sent to:', email);
   } catch (error) {
     console.error('⚠️ Error sending welcome email:', error);
@@ -490,10 +488,8 @@ export const sendWelcomeEmail = async (email, name) => {
 };
 
 export const sendTestEmail = async (email) => {
-  const transporter = createTransporter();
-
   const mailOptions = {
-    from: `"TeenShapers" <${process.env.EMAIL_USER}>`,
+    from: EMAIL_FROM,
     to: email,
     subject: 'TeenShapers Email Configuration Test ✅',
     html: `
@@ -517,10 +513,8 @@ export const sendTestEmail = async (email) => {
               
               <div class="feature">
                 <div class="feature-title">📧 Configuration Details</div>
-                <p><strong>Service:</strong> ${
-                  process.env.EMAIL_SERVICE || 'gmail'
-                }</p>
-                <p><strong>From:</strong> ${process.env.EMAIL_USER}</p>
+                <p><strong>Service:</strong> Resend</p>
+                <p><strong>From:</strong> ${EMAIL_FROM}</p>
                 <p><strong>Time:</strong> ${new Date().toISOString()}</p>
               </div>
               
@@ -540,8 +534,8 @@ export const sendTestEmail = async (email) => {
       
       If you're seeing this email, your TeenShapers email service is configured correctly.
       
-      Service: ${process.env.EMAIL_SERVICE || 'gmail'}
-      From: ${process.env.EMAIL_USER}
+      Service: Resend
+      From: ${EMAIL_FROM}
       Time: ${new Date().toISOString()}
       
       You're all set to send verification and password reset emails!
@@ -549,7 +543,8 @@ export const sendTestEmail = async (email) => {
   };
 
   try {
-    await transporter.sendMail(mailOptions);
+    const { error } = await resend.emails.send(mailOptions);
+    if (error) throw error;
     console.log('✅ Test email sent successfully to:', email);
     return true;
   } catch (error) {
