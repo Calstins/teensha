@@ -69,6 +69,18 @@ export const submitTaskResponse = async (req, res) => {
       },
     });
 
+    // ✅ Submissions are final once made — a task cannot be edited/resubmitted
+    // after it has been submitted (mirrors the mobile UI, which already hides
+    // the submission form once a submission exists). Enforced here too so it
+    // can't be bypassed by calling the API directly.
+    if (existingSubmission) {
+      return res.status(400).json({
+        success: false,
+        message:
+          'This task has already been submitted and cannot be edited.',
+      });
+    }
+
     // ✅ CRITICAL FIX: Parse content if it's a JSON string
     let parsedContent;
     try {

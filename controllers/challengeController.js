@@ -475,6 +475,116 @@ export const getCurrentChallenge = async (req, res) => {
   }
 };
 
+// Returns every published challenge (past, current, and upcoming) for the
+// teen-facing "all challenges" screen. Past/current challenges include the
+// teen's own progress so they can be resumed; upcoming challenges are
+// returned with minimal info only (no tasks/instructions) since teens
+// shouldn't be able to preview or participate in them yet — the mobile app
+// renders those as locked.
+export const getAllChallengesForTeen = async (req, res) => {
+  try {
+    const currentDate = new Date();
+
+    const challenges = await prisma.monthlyChallenge.findMany({
+      where: {
+        isPublished: true,
+      },
+      include: {
+        badge: true,
+        _count: {
+          select: { tasks: true },
+        },
+      },
+      orderBy: [{ year: 'desc' }, { month: 'desc' }],
+    });
+
+    const challengeIds = challenges.map((c) => c.id);
+
+    const [allProgress, allTeenBadges] = await Promise.all([
+      prisma.teenProgress.findMany({
+        where: { teenId: req.teen.id, challengeId: { in: challengeIds } },
+      }),
+      prisma.teenBadge.findMany({
+        where: {
+          teenId: req.teen.id,
+          badgeId: { in: challenges.map((c) => c.badge?.id).filter(Boolean) },
+        },
+      }),
+    ]);
+
+    const progressByChallenge = Object.fromEntries(
+      allProgress.map((p) => [p.challengeId, p])
+    );
+    const teenBadgeByBadgeId = Object.fromEntries(
+      allTeenBadges.map((b) => [b.badgeId, b])
+    );
+
+    const data = challenges.map((challenge) => {
+      const isUpcoming = new Date(challenge.goLiveDate) > currentDate;
+      const isPastChallenge =
+        !isUpcoming && new Date(challenge.closingDate) < currentDate;
+      const status = isUpcoming
+        ? 'upcoming'
+        : isPastChallenge
+          ? 'past'
+          : 'current';
+
+      const base = {
+        id: challenge.id,
+        year: challenge.year,
+        month: challenge.month,
+        goLiveDate: challenge.goLiveDate,
+        closingDate: challenge.closingDate,
+        status,
+        isUpcoming,
+        isPastChallenge,
+        tasksCount: challenge._count.tasks,
+      };
+
+      // Upcoming challenges stay locked/hidden — teens only see that
+      // something is coming, not the theme, instructions, or badge.
+      if (isUpcoming) {
+        return base;
+      }
+
+      const progress = progressByChallenge[challenge.id];
+      const teenBadge = challenge.badge
+        ? teenBadgeByBadgeId[challenge.badge.id]
+        : null;
+
+      return {
+        ...base,
+        theme: challenge.theme,
+        instructions: challenge.instructions,
+        badge: challenge.badge
+          ? {
+              ...challenge.badge,
+              status: teenBadge?.status || 'AVAILABLE',
+              isPurchased: teenBadge?.isPurchased || false,
+            }
+          : null,
+        progress: progress || {
+          tasksTotal: challenge._count.tasks,
+          tasksCompleted: 0,
+          percentage: 0,
+        },
+      };
+    });
+
+    res.json({
+      success: true,
+      data,
+    });
+  } catch (error) {
+    console.error('Get all challenges for teen error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Internal server error',
+      error: error.message,
+    });
+  }
+};
+
 export const getCommunityStats = async (req, res) => {
   try {
     const currentDate = new Date();
@@ -865,6 +975,28 @@ export const getChallengeByIdForTeen = async (req, res) => {
       });
     }
 
+    // ✅ Teens can't view or participate in a challenge before it goes live —
+    // the mobile app locks these in the "All Challenges" list, but this
+    // guards the API too in case the id is opened directly.
+    const currentDate = new Date();
+    const isUpcoming = new Date(challenge.goLiveDate) > currentDate;
+    if (isUpcoming) {
+      return res.status(403).json({
+        success: false,
+        message: 'This challenge is not live yet. Check back soon!',
+        data: {
+          challenge: {
+            id: challenge.id,
+            year: challenge.year,
+            month: challenge.month,
+            goLiveDate: challenge.goLiveDate,
+            isUpcoming: true,
+          },
+        },
+      });
+    }
+    const isPastChallenge = new Date(challenge.closingDate) < currentDate;
+
     // Get teen's progress for this challenge
     const progress = await prisma.teenProgress.findUnique({
       where: {
@@ -940,6 +1072,8 @@ export const getChallengeByIdForTeen = async (req, res) => {
           closingDate: challenge.closingDate,
           year: challenge.year,
           month: challenge.month,
+          isPastChallenge,
+          isUpcoming: false,
         },
         tasks: tasksByTab,
         badge: challenge.badge

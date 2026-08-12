@@ -10,6 +10,7 @@ import {
   getCommunityStats,
   getLeaderboard,
   getChallengeByIdForTeen,
+  getAllChallengesForTeen,
 } from '../controllers/challengeController.js';
 
 import {
@@ -95,6 +96,7 @@ router.get('/dashboard', authenticateTeen, getDashboard);
 // ============================================
 // CHALLENGE ROUTES (TEEN-FACING)
 // ============================================
+router.get('/challenges', authenticateTeen, getAllChallengesForTeen);
 router.get('/challenges/current', authenticateTeen, getCurrentChallenge);
 router.get('/challenges/stats', authenticateTeen, getCommunityStats);
 router.get('/challenges/leaderboard', authenticateTeen, getLeaderboard);
