@@ -535,6 +535,7 @@ export const getReviewQueue = async (req, res) => {
               title: true,
               tabName: true,
               taskType: true,
+              options: true,
               maxScore: true,
               challenge: {
                 select: {
