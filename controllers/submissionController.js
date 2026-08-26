@@ -182,10 +182,15 @@ export const submitTaskResponse = async (req, res) => {
         if (!validationError) {
           // parsedContent is already an object with answers
           const answers = parsedContent.answers || parsedContent;
-          // Ensure all values are strings
+          // Preserve arrays (checkbox/multi-select answers) instead of
+          // flattening them into a single comma-joined string - only
+          // stringify plain single-answer/text values.
           const sanitizedAnswers = {};
           Object.keys(answers).forEach((key) => {
-            sanitizedAnswers[key] = String(answers[key]);
+            const value = answers[key];
+            sanitizedAnswers[key] = Array.isArray(value)
+              ? value.map(String)
+              : String(value);
           });
           processedContent = {
             answers: sanitizedAnswers,

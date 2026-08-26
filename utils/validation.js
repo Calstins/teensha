@@ -202,15 +202,46 @@ export const validateQuizSubmission = (content, taskOptions) => {
     return 'Invalid quiz configuration';
   }
 
-  // Check if all questions are answered
   for (const question of taskOptions.questions) {
-    if (!answers[question.id]) {
-      return `Question "${question.text}" must be answered`;
+    const questionLabel = question.text || question.question || 'Question';
+    const answer = answers[question.id];
+    const questionType = question.type || 'multiple_choice';
+
+    const isEmpty =
+      answer === undefined ||
+      answer === null ||
+      (typeof answer === 'string' && answer.trim() === '') ||
+      (Array.isArray(answer) && answer.length === 0);
+
+    if (isEmpty) {
+      return `Question "${questionLabel}" must be answered`;
     }
 
-    // Validate the answer is one of the valid options
-    if (question.options && !question.options.includes(answers[question.id])) {
-      return `Invalid answer for question "${question.text}"`;
+    // Free-typed text answers have no fixed option set to check against.
+    if (questionType === 'text') {
+      continue;
+    }
+
+    if (questionType === 'checkbox') {
+      // Multi-select: answer should be an array of selected option strings.
+      const selected = Array.isArray(answer) ? answer : [answer];
+      if (
+        question.options &&
+        !selected.every((a) => question.options.includes(a))
+      ) {
+        return `Invalid answer for question "${questionLabel}"`;
+      }
+      continue;
+    }
+
+    // Default ('multiple_choice' or an untyped/legacy question): a single
+    // answer that must be one of the preset options.
+    if (
+      question.options &&
+      question.options.length > 0 &&
+      !question.options.includes(answer)
+    ) {
+      return `Invalid answer for question "${questionLabel}"`;
     }
   }
 
