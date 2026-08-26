@@ -17,6 +17,8 @@ import teenRoutes from './routes/teenRoutes.js';
 import webhookRoutes from './routes/webhookRoutes.js';
 import transactionRoutes from './routes/transactionRoutes.js';
 import uploadRoutes from './routes/uploadRoutes.js'; // ✅ ADD THIS
+import redirectRoutes from './routes/redirectRoutes.js';
+import wellKnownRoutes from './routes/wellKnownRoutes.js';
 
 dotenv.config();
 
@@ -25,13 +27,20 @@ const app = express();
 // Make prisma available to routes
 app.locals.prisma = prisma;
 
+// App-facing URLs, sourced from .env (see .env.example). Falling back to
+// the known-good production values keeps local `npm run dev` working even
+// without a .env file present.
+const APP_URL = (process.env.APP_URL || 'https://teensha.vercel.app').replace(/\/$/, '');
+const ADMIN_URL = (process.env.ADMIN_URL || 'https://teenshapersadmin.vercel.app').replace(/\/$/, '');
+app.locals.appUrl = APP_URL;
+
 // Middleware
 app.use(helmet());
 app.use(
   cors({
     origin: [
-      'https://teenshapersadmin.vercel.app',
-      'https://teenshaper.vercel.app',
+      ADMIN_URL,
+      APP_URL,
       'http://localhost:3000',
       'http://localhost:3001',
     ],
@@ -60,6 +69,12 @@ app.use('/api/progress', progressRoutes);
 app.use('/api/raffle', raffleRoutes);
 app.use('/api/admin/transactions', transactionRoutes);
 app.use('/api/upload', uploadRoutes); // ✅ ADD THIS ROUTE
+
+// Web bridge pages for links opened from email on mobile (not under /api,
+// these render HTML, not JSON)
+app.use('/', redirectRoutes);
+// Universal Links / App Links verification files (iOS + Android)
+app.use('/', wellKnownRoutes);
 // Root endpoint
 app.get('/', (req, res) => {
   res.json({
